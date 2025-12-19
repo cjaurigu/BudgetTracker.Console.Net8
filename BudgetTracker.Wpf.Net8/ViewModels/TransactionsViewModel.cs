@@ -1,22 +1,33 @@
 ﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using BudgetTracker.Console.Net8.Data;
 using BudgetTracker.Console.Net8.Domain;
+using BudgetTracker.Console.Net8.Domain.Enums;
 using BudgetTracker.Console.Net8.Services;
 using BudgetTracker.Wpf.Net8.Views;
 
 namespace BudgetTracker.Wpf.Net8.ViewModels
 {
+    /// <summary>
+    /// ViewModel for the main Transactions grid screen.
+    /// - Loads transactions from SQL via BudgetService
+    /// - Supports Refresh / Add / Edit / Delete
+    /// </summary>
     public sealed class TransactionsViewModel : INotifyPropertyChanged
     {
         private readonly BudgetService _budgetService;
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
+        // -----------------------------
+        // Data bound to the DataGrid
+        // -----------------------------
         public ObservableCollection<Transaction> Transactions { get; } = new();
 
+        // Selected row in the DataGrid
         private Transaction? _selectedTransaction;
         public Transaction? SelectedTransaction
         {
@@ -27,39 +38,53 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
                 {
                     _selectedTransaction = value;
                     OnPropertyChanged();
+
+                    // Enable/Disable buttons that depend on a selection
                     DeleteSelectedCommand.RaiseCanExecuteChanged();
+                    EditSelectedCommand.RaiseCanExecuteChanged();
                 }
             }
         }
 
+        // -----------------------------
+        // Commands (Buttons)
+        // -----------------------------
         public RelayCommand RefreshCommand { get; }
         public RelayCommand AddTransactionCommand { get; }
+        public RelayCommand EditSelectedCommand { get; }
         public RelayCommand DeleteSelectedCommand { get; }
 
         public TransactionsViewModel()
         {
+            // Uses your existing ADO.NET repository + service
             var repo = new TransactionRepository();
             _budgetService = new BudgetService(repo);
 
             RefreshCommand = new RelayCommand(Refresh);
             AddTransactionCommand = new RelayCommand(OpenAddDialog);
+            EditSelectedCommand = new RelayCommand(OpenEditDialog, () => SelectedTransaction != null);
             DeleteSelectedCommand = new RelayCommand(DeleteSelected, () => SelectedTransaction != null);
 
             Refresh();
         }
 
+        // -----------------------------
+        // Load / Refresh
+        // -----------------------------
         private void Refresh()
         {
             Transactions.Clear();
-            var all = _budgetService.GetAllTransactions();
 
+            var all = _budgetService.GetAllTransactions();
             foreach (var t in all)
                 Transactions.Add(t);
         }
 
+        // -----------------------------
+        // Add
+        // -----------------------------
         private void OpenAddDialog()
         {
-            // Owner = current main window so dialog centers nicely
             var window = new AddTransactionWindow
             {
                 Owner = Application.Current?.MainWindow
@@ -69,7 +94,6 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             if (result != true)
                 return;
 
-            // Read the created transaction from the dialog VM
             if (window.DataContext is AddTransactionViewModel vm && vm.CreatedTransaction != null)
             {
                 _budgetService.AddTransaction(vm.CreatedTransaction);
@@ -77,9 +101,83 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             }
         }
 
+        // -----------------------------
+        // Edit
+        // -----------------------------
+        private void OpenEditDialog()
+        {
+            if (SelectedTransaction == null)
+                return;
+
+            // Open the SAME dialog window, but pre-fill the existing values
+            var window = new AddTransactionWindow
+            {
+                Owner = Application.Current?.MainWindow
+            };
+
+            // Grab the dialog VM (it is created by XAML in AddTransactionWindow.xaml)
+            if (window.DataContext is AddTransactionViewModel vm)
+            {
+                // Fill fields from selected row
+                vm.Date = SelectedTransaction.Date;
+                vm.Description = SelectedTransaction.Description;
+                vm.AmountText = SelectedTransaction.Amount.ToString();
+
+                // Type: Transaction.Type is stored as "Income"/"Expense"
+                vm.SelectedType = SelectedTransaction.Type.Equals("Income", System.StringComparison.OrdinalIgnoreCase)
+                    ? TransactionType.Income
+                    : TransactionType.Expense;
+
+                // Category: prefer matching by CategoryId, else by Name
+                if (SelectedTransaction.CategoryId.HasValue)
+                {
+                    var matchById = vm.Categories.FirstOrDefault(c => c.Id == SelectedTransaction.CategoryId.Value);
+                    if (matchById != null)
+                        vm.SelectedCategory = matchById;
+                }
+
+                if (vm.SelectedCategory == null && !string.IsNullOrWhiteSpace(SelectedTransaction.Category))
+                {
+                    var matchByName = vm.Categories.FirstOrDefault(c =>
+                        c.Name.Equals(SelectedTransaction.Category, System.StringComparison.OrdinalIgnoreCase));
+
+                    if (matchByName != null)
+                        vm.SelectedCategory = matchByName;
+                }
+            }
+
+            var result = window.ShowDialog();
+            if (result != true)
+                return;
+
+            // Update existing transaction with the new values from the dialog
+            if (window.DataContext is AddTransactionViewModel vmAfter && vmAfter.CreatedTransaction != null)
+            {
+                var updated = vmAfter.CreatedTransaction;
+
+                // CRITICAL: keep the original Id so UPDATE happens (not insert)
+                updated.Id = SelectedTransaction.Id;
+
+                _budgetService.UpdateTransaction(updated);
+                Refresh();
+            }
+        }
+
+        // -----------------------------
+        // Delete
+        // -----------------------------
         private void DeleteSelected()
         {
             if (SelectedTransaction == null)
+                return;
+
+            var confirm = MessageBox.Show(
+                $"Delete transaction #{SelectedTransaction.Id}?\n\n{SelectedTransaction.Description}",
+                "Confirm Delete",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (confirm != MessageBoxResult.Yes)
                 return;
 
             _budgetService.DeleteTransaction(SelectedTransaction.Id);
