@@ -1,10 +1,11 @@
-﻿using System;
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Windows;
 using BudgetTracker.Console.Net8.Data;
 using BudgetTracker.Console.Net8.Domain;
 using BudgetTracker.Console.Net8.Services;
+using BudgetTracker.Wpf.Net8.Views;
 
 namespace BudgetTracker.Wpf.Net8.ViewModels
 {
@@ -32,17 +33,16 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
         }
 
         public RelayCommand RefreshCommand { get; }
-        public RelayCommand AddQuickTransactionCommand { get; }
+        public RelayCommand AddTransactionCommand { get; }
         public RelayCommand DeleteSelectedCommand { get; }
 
         public TransactionsViewModel()
         {
-            // Uses your existing ADO.NET repository + service
             var repo = new TransactionRepository();
             _budgetService = new BudgetService(repo);
 
             RefreshCommand = new RelayCommand(Refresh);
-            AddQuickTransactionCommand = new RelayCommand(AddQuickTransaction);
+            AddTransactionCommand = new RelayCommand(OpenAddDialog);
             DeleteSelectedCommand = new RelayCommand(DeleteSelected, () => SelectedTransaction != null);
 
             Refresh();
@@ -57,19 +57,24 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
                 Transactions.Add(t);
         }
 
-        private void AddQuickTransaction()
+        private void OpenAddDialog()
         {
-            var tx = new Transaction
+            // Owner = current main window so dialog centers nicely
+            var window = new AddTransactionWindow
             {
-                Description = "WPF Quick Add",
-                Amount = 1.00m,
-                Type = "Expense",
-                Category = "Uncategorized",
-                Date = DateTime.Today
+                Owner = Application.Current?.MainWindow
             };
 
-            _budgetService.AddTransaction(tx);
-            Refresh();
+            var result = window.ShowDialog();
+            if (result != true)
+                return;
+
+            // Read the created transaction from the dialog VM
+            if (window.DataContext is AddTransactionViewModel vm && vm.CreatedTransaction != null)
+            {
+                _budgetService.AddTransaction(vm.CreatedTransaction);
+                Refresh();
+            }
         }
 
         private void DeleteSelected()
