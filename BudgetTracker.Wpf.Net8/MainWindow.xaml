@@ -10,7 +10,6 @@
         Width="1050"
         WindowStartupLocation="CenterScreen">
 
-    <!-- Main ViewModel -->
     <Window.DataContext>
         <vm:TransactionsViewModel />
     </Window.DataContext>
@@ -18,8 +17,13 @@
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <!-- Toolbar -->
+            <RowDefinition Height="10"/>
+            <RowDefinition Height="Auto"/>
+            <!-- Search -->
             <RowDefinition Height="10"/>
             <RowDefinition Height="*"/>
+            <!-- Grid -->
         </Grid.RowDefinitions>
 
         <!-- ========================= -->
@@ -58,11 +62,42 @@
         </DockPanel>
 
         <!-- ========================= -->
+        <!-- Search Bar -->
+        <!-- ========================= -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0"
+                       VerticalAlignment="Center"
+                       FontWeight="SemiBold"
+                       Text="Search:" />
+
+            <TextBox Grid.Column="2"
+                     Height="28"
+                     VerticalContentAlignment="Center"
+                     Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                     ToolTip="Search Description or Category" />
+
+            <Button Grid.Column="4"
+                    Width="90"
+                    Height="28"
+                    Content="Clear"
+                    Command="{Binding ClearSearchCommand}" />
+        </Grid>
+
+        <!-- ========================= -->
         <!-- Transactions Grid -->
         <!-- ========================= -->
-        <DataGrid Grid.Row="2"
+        <DataGrid Grid.Row="4"
                   ItemsSource="{Binding Transactions}"
                   SelectedItem="{Binding SelectedTransaction, Mode=TwoWay}"
+                  MouseDoubleClick="TransactionsGrid_MouseDoubleClick"
                   AutoGenerateColumns="False"
                   IsReadOnly="True"
                   CanUserAddRows="False"

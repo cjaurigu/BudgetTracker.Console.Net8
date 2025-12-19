@@ -15,6 +15,7 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
     /// ViewModel for the main Transactions grid screen.
     /// - Loads transactions from SQL via BudgetService
     /// - Supports Refresh / Add / Edit / Delete
+    /// - Supports Search (Description + Category)
     /// </summary>
     public sealed class TransactionsViewModel : INotifyPropertyChanged
     {
@@ -46,12 +47,38 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
         }
 
         // -----------------------------
+        // Search / Filter
+        // -----------------------------
+        private string _searchText = string.Empty;
+
+        /// <summary>
+        /// Search text bound to the Search TextBox.
+        /// When it changes, we reload the grid using the search API.
+        /// </summary>
+        public string SearchText
+        {
+            get => _searchText;
+            set
+            {
+                if (_searchText != value)
+                {
+                    _searchText = value ?? string.Empty;
+                    OnPropertyChanged();
+
+                    ClearSearchCommand.RaiseCanExecuteChanged();
+                    ApplySearch();
+                }
+            }
+        }
+
+        // -----------------------------
         // Commands (Buttons)
         // -----------------------------
         public RelayCommand RefreshCommand { get; }
         public RelayCommand AddTransactionCommand { get; }
         public RelayCommand EditSelectedCommand { get; }
         public RelayCommand DeleteSelectedCommand { get; }
+        public RelayCommand ClearSearchCommand { get; }
 
         public TransactionsViewModel()
         {
@@ -63,6 +90,7 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             AddTransactionCommand = new RelayCommand(OpenAddDialog);
             EditSelectedCommand = new RelayCommand(OpenEditDialog, () => SelectedTransaction != null);
             DeleteSelectedCommand = new RelayCommand(DeleteSelected, () => SelectedTransaction != null);
+            ClearSearchCommand = new RelayCommand(ClearSearch, () => !string.IsNullOrWhiteSpace(SearchText));
 
             Refresh();
         }
@@ -72,11 +100,34 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
         // -----------------------------
         private void Refresh()
         {
-            Transactions.Clear();
+            // If user is searching, Refresh should re-run the same search.
+            // If empty search, show all.
+            ApplySearch();
+        }
 
-            var all = _budgetService.GetAllTransactions();
-            foreach (var t in all)
+        private void ApplySearch()
+        {
+            var keyword = (SearchText ?? string.Empty).Trim();
+
+            // Using your existing service method:
+            // - if keyword blank, it returns empty list
+            // - so we use GetAllTransactions when blank
+            var list = string.IsNullOrWhiteSpace(keyword)
+                ? _budgetService.GetAllTransactions()
+                : _budgetService.SearchTransactions(keyword);
+
+            Transactions.Clear();
+            foreach (var t in list)
                 Transactions.Add(t);
+
+            // If the selected transaction is no longer in the list, clear selection
+            if (SelectedTransaction != null && Transactions.All(t => t.Id != SelectedTransaction.Id))
+                SelectedTransaction = null;
+        }
+
+        private void ClearSearch()
+        {
+            SearchText = string.Empty; // triggers ApplySearch()
         }
 
         // -----------------------------
@@ -96,7 +147,7 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             if (window.DataContext is AddTransactionViewModel vm && vm.CreatedTransaction != null)
             {
                 _budgetService.AddTransaction(vm.CreatedTransaction);
-                Refresh();
+                ApplySearch(); // keep current filter applied
             }
         }
 
@@ -149,11 +200,11 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             {
                 var updated = vmAfter.CreatedTransaction;
 
-                // CRITICAL: keep the original Id so UPDATE happens (not insert)
+                // CRITICAL: keep original Id so UPDATE happens
                 updated.Id = SelectedTransaction.Id;
 
                 _budgetService.UpdateTransaction(updated);
-                Refresh();
+                ApplySearch(); // keep current filter applied
             }
         }
 
@@ -175,7 +226,7 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
                 return;
 
             _budgetService.DeleteTransaction(SelectedTransaction.Id);
-            Refresh();
+            ApplySearch(); // keep current filter applied
         }
 
         private void OnPropertyChanged([CallerMemberName] string? propName = null)
