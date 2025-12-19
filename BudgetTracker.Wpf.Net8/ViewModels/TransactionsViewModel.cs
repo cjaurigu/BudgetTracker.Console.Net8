@@ -39,7 +39,6 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
                     _selectedTransaction = value;
                     OnPropertyChanged();
 
-                    // Enable/Disable buttons that depend on a selection
                     DeleteSelectedCommand.RaiseCanExecuteChanged();
                     EditSelectedCommand.RaiseCanExecuteChanged();
                 }
@@ -109,26 +108,22 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             if (SelectedTransaction == null)
                 return;
 
-            // Open the SAME dialog window, but pre-fill the existing values
             var window = new AddTransactionWindow
             {
                 Owner = Application.Current?.MainWindow
             };
 
-            // Grab the dialog VM (it is created by XAML in AddTransactionWindow.xaml)
+            // Pre-fill from selected row
             if (window.DataContext is AddTransactionViewModel vm)
             {
-                // Fill fields from selected row
                 vm.Date = SelectedTransaction.Date;
                 vm.Description = SelectedTransaction.Description;
                 vm.AmountText = SelectedTransaction.Amount.ToString();
 
-                // Type: Transaction.Type is stored as "Income"/"Expense"
                 vm.SelectedType = SelectedTransaction.Type.Equals("Income", System.StringComparison.OrdinalIgnoreCase)
                     ? TransactionType.Income
                     : TransactionType.Expense;
 
-                // Category: prefer matching by CategoryId, else by Name
                 if (SelectedTransaction.CategoryId.HasValue)
                 {
                     var matchById = vm.Categories.FirstOrDefault(c => c.Id == SelectedTransaction.CategoryId.Value);
@@ -150,7 +145,6 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             if (result != true)
                 return;
 
-            // Update existing transaction with the new values from the dialog
             if (window.DataContext is AddTransactionViewModel vmAfter && vmAfter.CreatedTransaction != null)
             {
                 var updated = vmAfter.CreatedTransaction;
