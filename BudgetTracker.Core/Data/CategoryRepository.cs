@@ -1,18 +1,18 @@
-﻿using System.Collections.Generic;
+﻿// File: Data/CategoryRepository.cs
+// Namespace: BudgetTracker.Console.Net8.Data
+//
+// Purpose:
+// ADO.NET repository for Categories table.
+
+using System;
+using System.Collections.Generic;
 using Microsoft.Data.SqlClient;
 using BudgetTracker.Console.Net8.Domain;
 
 namespace BudgetTracker.Console.Net8.Data
 {
     /// <summary>
-    /// Handles ALL SQL operations for the Categories table.
-    /// This includes:
-    /// - Reading categories
-    /// - Adding new categories
-    /// - Updating category names
-    /// - Deleting categories
-    /// 
-    /// It acts as the "Data Access Layer" for Categories.
+    /// Data access layer for Categories.
     /// </summary>
     public class CategoryRepository
     {
@@ -20,12 +20,12 @@ namespace BudgetTracker.Console.Net8.Data
 
         public CategoryRepository()
         {
-            // Reads the SQL connection string from your DatabaseConfig class.
-            _connectionString = DatabaseConfig.ConnectionString;
+            _connectionString = DatabaseConfig.ConnectionString
+                ?? throw new InvalidOperationException("Database connection string is not configured.");
         }
 
         /// <summary>
-        /// Retrieves ALL categories from the database, sorted alphabetically.
+        /// Returns all categories sorted by name.
         /// </summary>
         public List<Category> GetAll()
         {
@@ -40,40 +40,40 @@ namespace BudgetTracker.Console.Net8.Data
             using var command = new SqlCommand(sql, connection);
 
             connection.Open();
-
             using var reader = command.ExecuteReader();
 
-            // Read one row at a time and convert it into a Category object.
             while (reader.Read())
             {
-                var category = new Category
+                results.Add(new Category
                 {
-                    Id = reader.GetInt32(0),     // Column 0 = Id
-                    Name = reader.GetString(1),  // Column 1 = Name
-                };
-
-                results.Add(category);
+                    Id = reader.GetInt32(0),
+                    Name = reader.GetString(1)
+                });
             }
 
             return results;
         }
 
         /// <summary>
-        /// Retrieves a single category by its ID (or null if not found).
+        /// Returns a category by Id, or null if not found.
         /// </summary>
         public Category? GetById(int id)
         {
-            const string sql = "SELECT Id, Name FROM Categories WHERE Id = @Id;";
+            const string sql = @"
+                SELECT Id, Name
+                FROM Categories
+                WHERE Id = @Id;";
 
             using var connection = new SqlConnection(_connectionString);
             using var command = new SqlCommand(sql, connection);
+
             command.Parameters.AddWithValue("@Id", id);
 
             connection.Open();
             using var reader = command.ExecuteReader();
 
             if (!reader.Read())
-                return null; // No match → return null
+                return null;
 
             return new Category
             {
@@ -83,14 +83,18 @@ namespace BudgetTracker.Console.Net8.Data
         }
 
         /// <summary>
-        /// Retrieves a category by name. Useful for checking duplicates.
+        /// Returns a category by name, or null if not found.
         /// </summary>
         public Category? GetByName(string name)
         {
-            const string sql = "SELECT Id, Name FROM Categories WHERE Name = @Name;";
+            const string sql = @"
+                SELECT Id, Name
+                FROM Categories
+                WHERE Name = @Name;";
 
             using var connection = new SqlConnection(_connectionString);
             using var command = new SqlCommand(sql, connection);
+
             command.Parameters.AddWithValue("@Name", name);
 
             connection.Open();
@@ -107,45 +111,51 @@ namespace BudgetTracker.Console.Net8.Data
         }
 
         /// <summary>
-        /// Adds a new category to the database.
+        /// Inserts a new category row.
         /// </summary>
-        public void Add(Category category)
+        public void Add(string name)
         {
-            const string sql = "INSERT INTO Categories (Name) VALUES (@Name);";
+            const string sql = @"
+                INSERT INTO Categories (Name)
+                VALUES (@Name);";
 
             using var connection = new SqlConnection(_connectionString);
             using var command = new SqlCommand(sql, connection);
 
-            command.Parameters.AddWithValue("@Name", category.Name);
+            command.Parameters.AddWithValue("@Name", name);
 
             connection.Open();
-            command.ExecuteNonQuery(); // Execute the INSERT
+            command.ExecuteNonQuery();
         }
 
         /// <summary>
-        /// Updates the name of an existing category.
+        /// Renames a category by Id.
         /// </summary>
-        public void Update(Category category)
+        public void Rename(int id, string newName)
         {
-            const string sql = "UPDATE Categories SET Name = @Name WHERE Id = @Id;";
+            const string sql = @"
+                UPDATE Categories
+                SET Name = @Name
+                WHERE Id = @Id;";
 
             using var connection = new SqlConnection(_connectionString);
             using var command = new SqlCommand(sql, connection);
 
-            command.Parameters.AddWithValue("@Id", category.Id);
-            command.Parameters.AddWithValue("@Name", category.Name);
+            command.Parameters.AddWithValue("@Id", id);
+            command.Parameters.AddWithValue("@Name", newName);
 
             connection.Open();
-            command.ExecuteNonQuery(); // Execute UPDATE
+            command.ExecuteNonQuery();
         }
 
         /// <summary>
-        /// Deletes a category by ID.
-        /// WARNING: If CategoryId in Transactions has FK, this may fail without cascade rules.
+        /// Deletes a category by Id.
         /// </summary>
         public void Delete(int id)
         {
-            const string sql = "DELETE FROM Categories WHERE Id = @Id;";
+            const string sql = @"
+                DELETE FROM Categories
+                WHERE Id = @Id;";
 
             using var connection = new SqlConnection(_connectionString);
             using var command = new SqlCommand(sql, connection);
@@ -153,7 +163,7 @@ namespace BudgetTracker.Console.Net8.Data
             command.Parameters.AddWithValue("@Id", id);
 
             connection.Open();
-            command.ExecuteNonQuery(); // Execute DELETE
+            command.ExecuteNonQuery();
         }
     }
 }

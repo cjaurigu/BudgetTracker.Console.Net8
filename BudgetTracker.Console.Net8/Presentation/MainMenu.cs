@@ -2,10 +2,11 @@
 // Namespace: BudgetTracker.Console.Net8.Presentation
 //
 // Purpose:
-// Orchestrates the console UI:
-//  - Shows the main menu
-//  - Reads user input
-//  - Calls into services (BudgetService, CategoryService)
+// Orchestrates the console UI for the BudgetTracker app:
+// - Transactions (CRUD + summaries)
+// - Categories (CRUD)
+// - Budgets (set/view/delete + budget report)
+// - Recurring Transactions (templates + run due items)
 
 using System;
 using System.Linq;
@@ -18,30 +19,37 @@ using SystemConsole = System.Console;
 namespace BudgetTracker.Console.Net8.Presentation
 {
     /// <summary>
-    /// Main entry-point class for the console UI.
+    /// Main console menu for the application.
     /// </summary>
     public class MainMenu
     {
         private readonly BudgetService _budgetService;
         private readonly CategoryService _categoryService;
+        private readonly BudgetPlanService _budgetPlanService;
+
+        private readonly RecurringTransactionService _recurringService;
 
         /// <summary>
-        /// Constructs the main menu and wires up repositories + services.
+        /// Wires up repositories + services.
         /// </summary>
         public MainMenu()
         {
-            // Build the repositories (data layer).
+            // Data layer
             var transactionRepo = new TransactionRepository();
             var categoryRepo = new CategoryRepository();
+            var budgetRepo = new CategoryBudgetRepository();
+            var recurringRepo = new RecurringTransactionRepository();
 
-            // Build services (business layer).
+            // Service layer
             _budgetService = new BudgetService(transactionRepo);
             _categoryService = new CategoryService(categoryRepo);
+            _budgetPlanService = new BudgetPlanService(budgetRepo, categoryRepo);
+
+            _recurringService = new RecurringTransactionService(recurringRepo, _budgetService);
         }
 
         /// <summary>
-        /// Starts the main menu loop and keeps showing options
-        /// until the user chooses to exit.
+        /// Starts the main menu loop.
         /// </summary>
         public void Run()
         {
@@ -62,10 +70,12 @@ namespace BudgetTracker.Console.Net8.Presentation
                 SystemConsole.WriteLine("8. Delete Transaction");
                 SystemConsole.WriteLine("9. Manage Categories");
                 SystemConsole.WriteLine("10. Search Transactions");
-                SystemConsole.WriteLine("11. Exit");
+                SystemConsole.WriteLine("11. Manage Budgets");
+                SystemConsole.WriteLine("12. Recurring Transactions");
+                SystemConsole.WriteLine("13. Exit");
                 SystemConsole.WriteLine();
 
-                var choice = InputHelper.ReadInt("Choose an option (1-11): ", 1, 11);
+                var choice = InputHelper.ReadInt("Choose an option (1-13): ", 1, 13);
 
                 switch (choice)
                 {
@@ -100,6 +110,12 @@ namespace BudgetTracker.Console.Net8.Presentation
                         SearchTransactionsFlow();
                         break;
                     case 11:
+                        ManageBudgetsFlow();
+                        break;
+                    case 12:
+                        ManageRecurringFlow();
+                        break;
+                    case 13:
                         exit = true;
                         break;
                 }
@@ -114,12 +130,9 @@ namespace BudgetTracker.Console.Net8.Presentation
         }
 
         // -----------------------------------------------------------
-        // OPTION 1: ADD TRANSACTION
+        // TRANSACTIONS
         // -----------------------------------------------------------
 
-        /// <summary>
-        /// Guides the user through entering a new transaction.
-        /// </summary>
         private void AddTransactionFlow()
         {
             SystemConsole.Clear();
@@ -130,57 +143,7 @@ namespace BudgetTracker.Console.Net8.Presentation
             var type = InputHelper.ReadTransactionType("Type (1 = Income, 2 = Expense): ");
             var date = InputHelper.ReadDate("Date (YYYY-MM-DD) or blank for today: ");
 
-            // Load all existing categories from the service.
-            var categories = _categoryService.GetAllCategories();
-
-            SystemConsole.WriteLine();
-            SystemConsole.WriteLine("Available categories:");
-
-            if (categories.Count == 0)
-            {
-                SystemConsole.WriteLine("(No categories yet. You can define some in 'Manage Categories'.)");
-            }
-            else
-            {
-                foreach (var c in categories)
-                {
-                    SystemConsole.WriteLine($"{c.Id}: {c.Name}");
-                }
-            }
-
-            SystemConsole.WriteLine();
-            SystemConsole.WriteLine("Options:");
-            SystemConsole.WriteLine(" - Enter an existing Category ID to use it");
-            SystemConsole.WriteLine(" - Enter 0 to type a custom category");
-
-            var categoryId = InputHelper.ReadInt("Category ID (or 0 for custom): ", 0, int.MaxValue);
-
-            string categoryName;
-
-            if (categoryId == 0)
-            {
-                SystemConsole.Write("Enter category name: ");
-                categoryName = SystemConsole.ReadLine() ?? string.Empty;
-
-                if (!string.IsNullOrWhiteSpace(categoryName))
-                {
-                    _categoryService.AddCategory(categoryName);
-                }
-            }
-            else
-            {
-                var selected = categories.FirstOrDefault(c => c.Id == categoryId);
-
-                if (selected == null)
-                {
-                    SystemConsole.WriteLine("Invalid category ID. Defaulting to 'Uncategorized'.");
-                    categoryName = "Uncategorized";
-                }
-                else
-                {
-                    categoryName = selected.Name;
-                }
-            }
+            var (categoryId, categoryName) = PromptForCategorySelection();
 
             var transaction = new Transaction
             {
@@ -188,6 +151,7 @@ namespace BudgetTracker.Console.Net8.Presentation
                 Amount = amount,
                 Type = type == TransactionType.Income ? "Income" : "Expense",
                 Category = categoryName,
+                CategoryId = categoryId,
                 Date = date
             };
 
@@ -197,13 +161,6 @@ namespace BudgetTracker.Console.Net8.Presentation
             SystemConsole.WriteLine("Transaction saved successfully.");
         }
 
-        // -----------------------------------------------------------
-        // OPTION 2: VIEW ALL TRANSACTIONS
-        // -----------------------------------------------------------
-
-        /// <summary>
-        /// Shows all transactions in a table.
-        /// </summary>
         private void ViewAllFlow()
         {
             SystemConsole.Clear();
@@ -213,13 +170,6 @@ namespace BudgetTracker.Console.Net8.Presentation
             OutputFormatter.PrintTransactions(all);
         }
 
-        // -----------------------------------------------------------
-        // OPTION 3–4: VIEW BY TYPE (INCOME / EXPENSE)
-        // -----------------------------------------------------------
-
-        /// <summary>
-        /// Displays only income or only expenses, based on the TransactionType.
-        /// </summary>
         private void ViewByTypeFlow(TransactionType type)
         {
             SystemConsole.Clear();
@@ -231,21 +181,12 @@ namespace BudgetTracker.Console.Net8.Presentation
             OutputFormatter.PrintTransactions(items);
         }
 
-        // -----------------------------------------------------------
-        // OPTION 10: SEARCH TRANSACTIONS
-        // -----------------------------------------------------------
-
-        /// <summary>
-        /// Allows the user to search transactions by a keyword that appears
-        /// in the description or category (case-insensitive).
-        /// </summary>
         private void SearchTransactionsFlow()
         {
             SystemConsole.Clear();
             SystemConsole.WriteLine("=== Search Transactions ===");
 
             var keyword = InputHelper.ReadString("Enter keyword to search in description or category: ");
-
             var results = _budgetService.SearchTransactions(keyword);
 
             if (results.Count == 0)
@@ -260,14 +201,6 @@ namespace BudgetTracker.Console.Net8.Presentation
             }
         }
 
-        // -----------------------------------------------------------
-        // OPTION 5: MONTHLY SUMMARY (NOW WITH CATEGORY BREAKDOWN)
-        // -----------------------------------------------------------
-
-        /// <summary>
-        /// Shows a specific month’s transactions, category breakdown,
-        /// and totals (income, expenses, net).
-        /// </summary>
         private void ViewMonthlySummaryFlow()
         {
             SystemConsole.Clear();
@@ -276,34 +209,23 @@ namespace BudgetTracker.Console.Net8.Presentation
             var year = InputHelper.ReadInt("Year (e.g., 2025): ", 2000, 2100);
             var month = InputHelper.ReadInt("Month (1-12): ", 1, 12);
 
-            // 1) All transactions for that month.
             var monthlyItems = _budgetService.GetByMonth(year, month);
-
-            // 2) Totals for that month.
             var (income, expenses) = _budgetService.GetMonthlyTotals(year, month);
 
-            // 3) Category-level breakdown for that month.
-            var categorySummaries = _budgetService.GetCategorySummariesByMonth(year, month);
-
-            // Raw transactions.
             OutputFormatter.PrintTransactions(monthlyItems);
 
-            // Category breakdown.
+            var categorySummaries = _budgetService.GetCategorySummariesByMonth(year, month);
             var monthName = new DateTime(year, month, 1).ToString("MMMM");
-            var title = $"Category Summary – {monthName} {year}";
-            OutputFormatter.PrintCategorySummaries(categorySummaries, title);
 
-            // Overall totals.
+            OutputFormatter.PrintCategorySummaries(categorySummaries, $"Category Summary – {monthName} {year}");
+
+            // Phase 1 budget reporting joins on CategoryName (simple and stable for now).
+            var budgets = _budgetPlanService.GetAllBudgetsWithNames();
+            OutputFormatter.PrintMonthlyBudgetReport(categorySummaries, budgets, $"Budget Report – {monthName} {year}");
+
             OutputFormatter.PrintTotals(income, expenses);
         }
 
-        // -----------------------------------------------------------
-        // OPTION 6: OVERALL TOTALS (NOW WITH CATEGORY BREAKDOWN)
-        // -----------------------------------------------------------
-
-        /// <summary>
-        /// Shows overall category breakdown and totals across ALL time.
-        /// </summary>
         private void ViewOverallTotalsFlow()
         {
             SystemConsole.Clear();
@@ -316,13 +238,6 @@ namespace BudgetTracker.Console.Net8.Presentation
             OutputFormatter.PrintTotals(income, expenses);
         }
 
-        // -----------------------------------------------------------
-        // OPTION 7: EDIT TRANSACTION
-        // -----------------------------------------------------------
-
-        /// <summary>
-        /// Allows user to edit a specific transaction by Id.
-        /// </summary>
         private void EditTransactionFlow()
         {
             SystemConsole.Clear();
@@ -338,14 +253,6 @@ namespace BudgetTracker.Console.Net8.Presentation
             }
 
             SystemConsole.WriteLine();
-            SystemConsole.WriteLine("Current values:");
-            SystemConsole.WriteLine($"Description: {existing.Description}");
-            SystemConsole.WriteLine($"Amount     : {existing.Amount}");
-            SystemConsole.WriteLine($"Type       : {existing.Type}");
-            SystemConsole.WriteLine($"Category   : {existing.Category}");
-            SystemConsole.WriteLine($"Date       : {existing.Date:yyyy-MM-dd}");
-            SystemConsole.WriteLine();
-
             SystemConsole.WriteLine("Press Enter to KEEP the existing value.");
             SystemConsole.WriteLine();
 
@@ -368,10 +275,6 @@ namespace BudgetTracker.Console.Net8.Presentation
                 {
                     existing.Type = char.ToUpper(typeInput[0]) + typeInput[1..].ToLower();
                 }
-                else
-                {
-                    SystemConsole.WriteLine("Invalid type entered. Keeping existing value.");
-                }
             }
 
             SystemConsole.Write($"New category (current: {existing.Category}): ");
@@ -381,11 +284,8 @@ namespace BudgetTracker.Console.Net8.Presentation
 
             SystemConsole.Write($"New date (YYYY-MM-DD, current: {existing.Date:yyyy-MM-dd}): ");
             var dateInput = SystemConsole.ReadLine();
-            if (!string.IsNullOrWhiteSpace(dateInput) &&
-                DateTime.TryParse(dateInput, out var newDate))
-            {
+            if (!string.IsNullOrWhiteSpace(dateInput) && DateTime.TryParse(dateInput, out var newDate))
                 existing.Date = newDate;
-            }
 
             _budgetService.UpdateTransaction(existing);
 
@@ -393,13 +293,6 @@ namespace BudgetTracker.Console.Net8.Presentation
             SystemConsole.WriteLine("Transaction updated successfully.");
         }
 
-        // -----------------------------------------------------------
-        // OPTION 8: DELETE TRANSACTION
-        // -----------------------------------------------------------
-
-        /// <summary>
-        /// Deletes a transaction by ID (with confirmation).
-        /// </summary>
         private void DeleteTransactionFlow()
         {
             SystemConsole.Clear();
@@ -413,16 +306,6 @@ namespace BudgetTracker.Console.Net8.Presentation
                 SystemConsole.WriteLine($"No transaction found with ID {id}.");
                 return;
             }
-
-            SystemConsole.WriteLine();
-            SystemConsole.WriteLine("Transaction to delete:");
-            SystemConsole.WriteLine($"ID         : {existing.Id}");
-            SystemConsole.WriteLine($"Description: {existing.Description}");
-            SystemConsole.WriteLine($"Amount     : {existing.Amount}");
-            SystemConsole.WriteLine($"Type       : {existing.Type}");
-            SystemConsole.WriteLine($"Category   : {existing.Category}");
-            SystemConsole.WriteLine($"Date       : {existing.Date:yyyy-MM-dd}");
-            SystemConsole.WriteLine();
 
             SystemConsole.Write("Are you sure you want to delete this transaction? (Y/N): ");
             var confirm = (SystemConsole.ReadLine() ?? string.Empty).Trim();
@@ -440,13 +323,9 @@ namespace BudgetTracker.Console.Net8.Presentation
         }
 
         // -----------------------------------------------------------
-        // OPTION 9: MANAGE CATEGORIES
+        // CATEGORIES
         // -----------------------------------------------------------
 
-        /// <summary>
-        /// Shows the "Manage Categories" submenu and loops within it
-        /// until the user chooses to go back to the main menu.
-        /// </summary>
         private void ManageCategoriesFlow()
         {
             bool back = false;
@@ -492,9 +371,6 @@ namespace BudgetTracker.Console.Net8.Presentation
             }
         }
 
-        /// <summary>
-        /// Displays all categories.
-        /// </summary>
         private void ViewCategories()
         {
             SystemConsole.Clear();
@@ -503,21 +379,12 @@ namespace BudgetTracker.Console.Net8.Presentation
             var categories = _categoryService.GetAllCategories();
 
             if (categories.Count == 0)
-            {
                 SystemConsole.WriteLine("No categories defined yet.");
-            }
             else
-            {
                 foreach (var c in categories)
-                {
                     SystemConsole.WriteLine($"{c.Id}: {c.Name}");
-                }
-            }
         }
 
-        /// <summary>
-        /// Adds a new category.
-        /// </summary>
         private void AddCategory()
         {
             SystemConsole.Clear();
@@ -529,53 +396,46 @@ namespace BudgetTracker.Console.Net8.Presentation
             SystemConsole.WriteLine("Category added.");
         }
 
-        /// <summary>
-        /// Renames an existing category by Id.
-        /// </summary>
         private void RenameCategory()
         {
             SystemConsole.Clear();
             SystemConsole.WriteLine("=== Rename Category ===");
 
             var categories = _categoryService.GetAllCategories();
-            ViewCategories();
-
-            var id = InputHelper.ReadInt("Enter the ID of the category to rename: ", 1, int.MaxValue);
-            var existing = categories.FirstOrDefault(c => c.Id == id);
-
-            if (existing == null)
+            if (categories.Count == 0)
             {
-                SystemConsole.WriteLine($"No category found with ID {id}.");
+                SystemConsole.WriteLine("No categories to rename.");
                 return;
             }
 
-            var newName = InputHelper.ReadString($"New name for '{existing.Name}': ");
-            _categoryService.RenameCategory(id, newName);
+            foreach (var c in categories)
+                SystemConsole.WriteLine($"{c.Id}: {c.Name}");
 
+            var id = InputHelper.ReadInt("Enter the ID of the category to rename: ", 1, int.MaxValue);
+            var newName = InputHelper.ReadString("New name: ");
+
+            _categoryService.RenameCategory(id, newName);
             SystemConsole.WriteLine("Category renamed.");
         }
 
-        /// <summary>
-        /// Deletes a category by Id (no transaction remap yet).
-        /// </summary>
         private void DeleteCategory()
         {
             SystemConsole.Clear();
             SystemConsole.WriteLine("=== Delete Category ===");
 
             var categories = _categoryService.GetAllCategories();
-            ViewCategories();
-
-            var id = InputHelper.ReadInt("Enter the ID of the category to delete: ", 1, int.MaxValue);
-            var existing = categories.FirstOrDefault(c => c.Id == id);
-
-            if (existing == null)
+            if (categories.Count == 0)
             {
-                SystemConsole.WriteLine($"No category found with ID {id}.");
+                SystemConsole.WriteLine("No categories to delete.");
                 return;
             }
 
-            SystemConsole.Write($"Are you sure you want to delete '{existing.Name}'? (Y/N): ");
+            foreach (var c in categories)
+                SystemConsole.WriteLine($"{c.Id}: {c.Name}");
+
+            var id = InputHelper.ReadInt("Enter the ID of the category to delete: ", 1, int.MaxValue);
+
+            SystemConsole.Write("Are you sure? (Y/N): ");
             var confirm = (SystemConsole.ReadLine() ?? string.Empty).Trim();
 
             if (confirm.Equals("Y", StringComparison.OrdinalIgnoreCase) ||
@@ -588,6 +448,313 @@ namespace BudgetTracker.Console.Net8.Presentation
             {
                 SystemConsole.WriteLine("Delete cancelled.");
             }
+        }
+
+        // -----------------------------------------------------------
+        // BUDGETS
+        // -----------------------------------------------------------
+
+        private void ManageBudgetsFlow()
+        {
+            bool back = false;
+
+            while (!back)
+            {
+                SystemConsole.Clear();
+                SystemConsole.WriteLine("=== Manage Budgets ===");
+                SystemConsole.WriteLine("1. Set/Update Budget for Category");
+                SystemConsole.WriteLine("2. View All Budgets");
+                SystemConsole.WriteLine("3. Delete Budget");
+                SystemConsole.WriteLine("4. Back");
+                SystemConsole.WriteLine();
+
+                var choice = InputHelper.ReadInt("Choose an option (1-4): ", 1, 4);
+
+                switch (choice)
+                {
+                    case 1:
+                        SetOrUpdateBudgetFlow();
+                        break;
+                    case 2:
+                        ViewAllBudgetsFlow();
+                        break;
+                    case 3:
+                        DeleteBudgetFlow();
+                        break;
+                    case 4:
+                        back = true;
+                        break;
+                }
+
+                if (!back)
+                {
+                    SystemConsole.WriteLine();
+                    SystemConsole.WriteLine("Press any key to continue...");
+                    SystemConsole.ReadKey();
+                }
+            }
+        }
+
+        private void SetOrUpdateBudgetFlow()
+        {
+            SystemConsole.Clear();
+            SystemConsole.WriteLine("=== Set / Update Budget ===");
+            SystemConsole.WriteLine();
+
+            var categories = _categoryService.GetAllCategories();
+            if (categories.Count == 0)
+            {
+                SystemConsole.WriteLine("No categories exist yet. Add a category first.");
+                return;
+            }
+
+            foreach (var c in categories)
+                SystemConsole.WriteLine($"{c.Id}: {c.Name}");
+
+            SystemConsole.WriteLine();
+
+            var categoryId = InputHelper.ReadInt("Enter Category ID: ", 1, int.MaxValue);
+            var amount = InputHelper.ReadDecimal("Enter monthly budget amount: ");
+
+            _budgetPlanService.SetBudget(categoryId, amount);
+
+            SystemConsole.WriteLine();
+            SystemConsole.WriteLine("Budget saved.");
+        }
+
+        private void ViewAllBudgetsFlow()
+        {
+            SystemConsole.Clear();
+            SystemConsole.WriteLine("=== All Budgets ===");
+
+            var budgets = _budgetPlanService.GetAllBudgetsWithNames();
+            OutputFormatter.PrintAllBudgets(budgets);
+        }
+
+        private void DeleteBudgetFlow()
+        {
+            SystemConsole.Clear();
+            SystemConsole.WriteLine("=== Delete Budget ===");
+            SystemConsole.WriteLine();
+
+            var budgets = _budgetPlanService.GetAllBudgetsWithNames();
+            OutputFormatter.PrintAllBudgets(budgets);
+
+            SystemConsole.WriteLine();
+
+            var categoryId = InputHelper.ReadInt("Enter Category ID to delete budget for: ", 1, int.MaxValue);
+            _budgetPlanService.DeleteBudget(categoryId);
+
+            SystemConsole.WriteLine();
+            SystemConsole.WriteLine("Budget deleted (if it existed).");
+        }
+
+        // -----------------------------------------------------------
+        // RECURRING TRANSACTIONS
+        // -----------------------------------------------------------
+
+        private void ManageRecurringFlow()
+        {
+            bool back = false;
+
+            while (!back)
+            {
+                SystemConsole.Clear();
+                SystemConsole.WriteLine("=== Recurring Transactions ===");
+                SystemConsole.WriteLine("1. Add Recurring Template");
+                SystemConsole.WriteLine("2. View Templates");
+                SystemConsole.WriteLine("3. Deactivate Template");
+                SystemConsole.WriteLine("4. Run Due Templates (Generate Transactions)");
+                SystemConsole.WriteLine("5. Back");
+                SystemConsole.WriteLine();
+
+                var choice = InputHelper.ReadInt("Choose an option (1-5): ", 1, 5);
+
+                switch (choice)
+                {
+                    case 1:
+                        AddRecurringTemplateFlow();
+                        break;
+                    case 2:
+                        ViewRecurringTemplatesFlow();
+                        break;
+                    case 3:
+                        DeactivateRecurringTemplateFlow();
+                        break;
+                    case 4:
+                        RunDueRecurringFlow();
+                        break;
+                    case 5:
+                        back = true;
+                        break;
+                }
+
+                if (!back)
+                {
+                    SystemConsole.WriteLine();
+                    SystemConsole.WriteLine("Press any key to continue...");
+                    SystemConsole.ReadKey();
+                }
+            }
+        }
+
+        private void AddRecurringTemplateFlow()
+        {
+            SystemConsole.Clear();
+            SystemConsole.WriteLine("=== Add Recurring Template ===");
+
+            var description = InputHelper.ReadString("Description: ");
+            var amount = InputHelper.ReadDecimal("Amount: ");
+            var type = InputHelper.ReadTransactionType("Type (1 = Income, 2 = Expense): ");
+            var startDate = InputHelper.ReadDate("Start date (YYYY-MM-DD) or blank for today: ");
+
+            var (categoryId, categoryName) = PromptForCategorySelection();
+
+            SystemConsole.WriteLine();
+            SystemConsole.WriteLine("Frequency:");
+            SystemConsole.WriteLine("1. Weekly");
+            SystemConsole.WriteLine("2. Bi-Weekly");
+            SystemConsole.WriteLine("3. Monthly");
+
+            var freqChoice = InputHelper.ReadInt("Choose frequency (1-3): ", 1, 3);
+            var frequency = (RecurringFrequency)freqChoice;
+
+            int? dayOfMonth = null;
+            if (frequency == RecurringFrequency.Monthly)
+            {
+                // Using 1–28 prevents “Feb 30th” style issues.
+                dayOfMonth = InputHelper.ReadInt("Day of month (1-28): ", 1, 28);
+            }
+
+            var typeText = type == TransactionType.Income ? "Income" : "Expense";
+
+            var id = _recurringService.CreateTemplate(
+                description,
+                amount,
+                typeText,
+                categoryName,
+                categoryId,
+                startDate,
+                frequency,
+                dayOfMonth);
+
+            SystemConsole.WriteLine();
+            SystemConsole.WriteLine($"Recurring template created (Id: {id}).");
+        }
+
+        private void ViewRecurringTemplatesFlow()
+        {
+            SystemConsole.Clear();
+            SystemConsole.WriteLine("=== Recurring Templates ===");
+            SystemConsole.WriteLine();
+
+            var templates = _recurringService.GetAllTemplates();
+
+            if (templates.Count == 0)
+            {
+                SystemConsole.WriteLine("No recurring templates found.");
+                return;
+            }
+
+            SystemConsole.WriteLine("Id  Active  NextRun     Freq      Category                Description                     Amount   Type");
+            SystemConsole.WriteLine("--  ------  ----------  --------  ----------------------  ------------------------------  -------  ------");
+
+            foreach (var t in templates)
+            {
+                var active = t.IsActive ? "Yes" : "No";
+                SystemConsole.WriteLine(
+                    "{0,-3} {1,-6}  {2:yyyy-MM-dd}  {3,-8}  {4,-22}  {5,-30}  {6,7:C}  {7,-6}",
+                    t.Id,
+                    active,
+                    t.NextRunDate,
+                    t.Frequency,
+                    Truncate(t.Category, 22),
+                    Truncate(t.Description, 30),
+                    t.Amount,
+                    t.Type);
+            }
+        }
+
+        private void DeactivateRecurringTemplateFlow()
+        {
+            SystemConsole.Clear();
+            SystemConsole.WriteLine("=== Deactivate Template ===");
+            SystemConsole.WriteLine();
+
+            ViewRecurringTemplatesFlow();
+
+            SystemConsole.WriteLine();
+            var id = InputHelper.ReadInt("Enter template Id to deactivate: ", 1, int.MaxValue);
+
+            _recurringService.DeactivateTemplate(id);
+
+            SystemConsole.WriteLine();
+            SystemConsole.WriteLine("Template deactivated (if it existed).");
+        }
+
+        private void RunDueRecurringFlow()
+        {
+            SystemConsole.Clear();
+            SystemConsole.WriteLine("=== Run Due Templates ===");
+            SystemConsole.WriteLine();
+
+            var created = _recurringService.RunDue(DateTime.Today);
+
+            SystemConsole.WriteLine($"Generated {created} transaction(s).");
+        }
+
+        // -----------------------------------------------------------
+        // SHARED HELPERS
+        // -----------------------------------------------------------
+
+        private (int? categoryId, string categoryName) PromptForCategorySelection()
+        {
+            var categories = _categoryService.GetAllCategories();
+
+            SystemConsole.WriteLine();
+            SystemConsole.WriteLine("Available categories:");
+
+            if (categories.Count == 0)
+            {
+                SystemConsole.WriteLine("(No categories yet. You can add one now.)");
+            }
+            else
+            {
+                foreach (var c in categories)
+                    SystemConsole.WriteLine($"{c.Id}: {c.Name}");
+            }
+
+            SystemConsole.WriteLine();
+            SystemConsole.WriteLine("Options:");
+            SystemConsole.WriteLine(" - Enter an existing Category ID to use it");
+            SystemConsole.WriteLine(" - Enter 0 to type a custom category");
+
+            var categoryIdInput = InputHelper.ReadInt("Category ID (or 0 for custom): ", 0, int.MaxValue);
+
+            if (categoryIdInput == 0)
+            {
+                SystemConsole.Write("Enter category name: ");
+                var customName = (SystemConsole.ReadLine() ?? string.Empty).Trim();
+
+                if (string.IsNullOrWhiteSpace(customName))
+                    return (null, "Uncategorized");
+
+                var created = _categoryService.AddCategory(customName);
+                return (created.Id, created.Name);
+            }
+
+            var selected = categories.FirstOrDefault(c => c.Id == categoryIdInput);
+            if (selected == null)
+                return (null, "Uncategorized");
+
+            return (selected.Id, selected.Name);
+        }
+
+        private static string Truncate(string value, int maxLen)
+        {
+            if (string.IsNullOrEmpty(value)) return string.Empty;
+            if (value.Length <= maxLen) return value;
+            return value.Substring(0, maxLen);
         }
     }
 }

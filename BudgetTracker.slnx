@@ -1,3 +1,5 @@
 <Solution>
   <Project Path="BudgetTracker.Console.Net8/BudgetTracker.Console.Net8.csproj" />
+  <Project Path="BudgetTracker.Core/BudgetTracker.Core.csproj" Id="5e5ba1d9-f1c3-487e-8419-aaf19787fdda" />
+  <Project Path="BudgetTracker.Wpf.Net8/BudgetTracker.Wpf.Net8.csproj" Id="4692a72f-f99f-40bc-8751-863f530a339f" />
 </Solution>
