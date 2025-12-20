@@ -9,35 +9,29 @@ using BudgetTracker.Console.Net8.Services;
 namespace BudgetTracker.Wpf.Net8.ViewModels
 {
     /// <summary>
-    /// ViewModel for the Monthly / Category Summary tab.
+    /// ViewModel for the Summary tab.
+    /// - Tracks selected Month/Year
+    /// - Calculates Total Income / Total Expense / Net Total for that month
+    /// - Loads category breakdown for the selected month
+    /// - Auto-refreshes when Month/Year changes
     /// </summary>
     public sealed class SummaryViewModel : INotifyPropertyChanged
     {
         private readonly BudgetService _budgetService;
 
+        // Prevent refresh from running while we are still setting up defaults.
+        private bool _isInitializing;
+
         public event PropertyChangedEventHandler? PropertyChanged;
 
-        // -----------------------------
-        // UI-bound collections
-        // -----------------------------
-        public ObservableCollection<int> Years { get; } = new();
-        public ObservableCollection<int> Months { get; } = new();
-        public ObservableCollection<CategorySummary> Summaries { get; } = new();
+        // ------------------------------------
+        // Month/Year pickers
+        // ------------------------------------
 
-        // -----------------------------
-        // Selected values
-        // -----------------------------
-        private int _selectedYear;
-        public int SelectedYear
-        {
-            get => _selectedYear;
-            set
-            {
-                _selectedYear = value;
-                OnPropertyChanged();
-                LoadSummary();
-            }
-        }
+        public ObservableCollection<int> Months { get; } =
+            new ObservableCollection<int>(new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 });
+
+        public ObservableCollection<int> Years { get; } = new ObservableCollection<int>();
 
         private int _selectedMonth;
         public int SelectedMonth
@@ -45,54 +39,104 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             get => _selectedMonth;
             set
             {
+                if (_selectedMonth == value)
+                    return;
+
                 _selectedMonth = value;
                 OnPropertyChanged();
-                LoadSummary();
+
+                if (!_isInitializing)
+                    RefreshSummary();
             }
         }
 
+        private int _selectedYear;
+        public int SelectedYear
+        {
+            get => _selectedYear;
+            set
+            {
+                if (_selectedYear == value)
+                    return;
+
+                _selectedYear = value;
+                OnPropertyChanged();
+
+                if (!_isInitializing)
+                    RefreshSummary();
+            }
+        }
+
+        // ------------------------------------
+        // Totals strip values
+        // ------------------------------------
+
+        private decimal _totalIncome;
+        public decimal TotalIncome
+        {
+            get => _totalIncome;
+            private set { _totalIncome = value; OnPropertyChanged(); }
+        }
+
+        private decimal _totalExpense;
+        public decimal TotalExpense
+        {
+            get => _totalExpense;
+            private set { _totalExpense = value; OnPropertyChanged(); }
+        }
+
+        public decimal NetTotal => TotalIncome - TotalExpense;
+
+        // ------------------------------------
+        // Category breakdown grid
+        // ------------------------------------
+
+        public ObservableCollection<CategorySummary> CategorySummaries { get; } =
+            new ObservableCollection<CategorySummary>();
+
         public SummaryViewModel()
         {
-            var repo = new TransactionRepository();
-            _budgetService = new BudgetService(repo);
+            _budgetService = new BudgetService(new TransactionRepository());
 
-            LoadYearMonthOptions();
+            _isInitializing = true;
 
-            // Default to current month/year
-            SelectedYear = DateTime.Today.Year;
-            SelectedMonth = DateTime.Today.Month;
-        }
-
-        // -----------------------------
-        // Loaders
-        // -----------------------------
-        private void LoadYearMonthOptions()
-        {
-            Years.Clear();
-            Months.Clear();
-
-            // Simple range: last 5 years → next year
-            var currentYear = DateTime.Today.Year;
-            for (int y = currentYear - 5; y <= currentYear + 1; y++)
+            // Build year list (current year +/- 5)
+            var now = DateTime.Today;
+            for (int y = now.Year - 5; y <= now.Year + 5; y++)
                 Years.Add(y);
 
-            for (int m = 1; m <= 12; m++)
-                Months.Add(m);
+            // IMPORTANT:
+            // Set backing fields directly so we DON'T trigger RefreshSummary with month=0.
+            _selectedYear = now.Year;
+            _selectedMonth = now.Month;
+
+            // Notify UI of initial values
+            OnPropertyChanged(nameof(SelectedYear));
+            OnPropertyChanged(nameof(SelectedMonth));
+
+            _isInitializing = false;
+
+            // Now it's safe to refresh once with valid Month/Year
+            RefreshSummary();
         }
 
-        private void LoadSummary()
+        private void RefreshSummary()
         {
-            if (SelectedYear <= 0 || SelectedMonth <= 0)
+            // Defensive guard (extra safety)
+            if (SelectedMonth < 1 || SelectedMonth > 12)
                 return;
 
-            Summaries.Clear();
+            // 1) Totals strip
+            var (income, expenses) = _budgetService.GetMonthlyTotals(SelectedYear, SelectedMonth);
+            TotalIncome = income;
+            TotalExpense = expenses;
+            OnPropertyChanged(nameof(NetTotal));
 
-            var results = _budgetService.GetCategorySummariesByMonth(
-                SelectedYear,
-                SelectedMonth);
-
-            foreach (var item in results)
-                Summaries.Add(item);
+            // 2) Category breakdown
+            CategorySummaries.Clear();
+            var summaries = _budgetService.GetCategorySummariesByMonth(SelectedYear, SelectedMonth);
+            foreach (var s in summaries)
+                CategorySummaries.Add(s);
         }
 
         private void OnPropertyChanged([CallerMemberName] string? propName = null)
