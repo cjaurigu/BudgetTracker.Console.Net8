@@ -1,59 +1,24 @@
 ﻿<Window x:Class="BudgetTracker.Wpf.Net8.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:BudgetTracker.Wpf.Net8.ViewModels"
-        mc:Ignorable="d"
+        xmlns:conv="clr-namespace:BudgetTracker.Wpf.Net8.Converters"
         Title="Budget Tracker"
-        Height="650"
-        Width="1000">
+        Width="1000"
+        Height="650">
+
+    <Window.Resources>
+        <conv:DecimalSignToBrushConverter x:Key="NetBrush" />
+    </Window.Resources>
 
     <Grid>
         <TabControl>
 
-            <!-- ========================= -->
-            <!-- Transactions Tab -->
-            <!-- ========================= -->
-            <TabItem Header="Transactions">
-                <Grid Margin="12">
-                    <TextBlock
-                        Text="Transactions view (already implemented)"
-                        FontSize="16"
-                        VerticalAlignment="Center"
-                        HorizontalAlignment="Center"/>
-                </Grid>
-            </TabItem>
+            <TabItem Header="Transactions" />
+            <TabItem Header="Categories" />
+            <TabItem Header="Budgets" />
 
-            <!-- ========================= -->
-            <!-- Categories Tab -->
-            <!-- ========================= -->
-            <TabItem Header="Categories">
-                <Grid Margin="12">
-                    <TextBlock
-                        Text="Categories view"
-                        FontSize="16"
-                        VerticalAlignment="Center"
-                        HorizontalAlignment="Center"/>
-                </Grid>
-            </TabItem>
-
-            <!-- ========================= -->
-            <!-- Budgets Tab -->
-            <!-- ========================= -->
-            <TabItem Header="Budgets">
-                <Grid Margin="12">
-                    <TextBlock
-                        Text="Budgets view"
-                        FontSize="16"
-                        VerticalAlignment="Center"
-                        HorizontalAlignment="Center"/>
-                </Grid>
-            </TabItem>
-
-            <!-- ========================= -->
-            <!-- Summary Tab -->
-            <!-- ========================= -->
+            <!-- ================= Summary ================= -->
             <TabItem Header="Summary">
                 <TabItem.DataContext>
                     <vm:SummaryViewModel />
@@ -66,116 +31,79 @@
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <!-- Month / Year selectors -->
-                    <StackPanel Orientation="Horizontal"
-                                Grid.Row="0"
-                                Margin="0,0,0,12">
-                        <TextBlock Text="Month:"
-                                   VerticalAlignment="Center"
-                                   Margin="0,0,8,0"/>
-
+                    <!-- Month / Year -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <TextBlock Text="Month:" Margin="0,0,6,0"/>
                         <ComboBox Width="80"
                                   ItemsSource="{Binding Months}"
-                                  SelectedItem="{Binding SelectedMonth, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                  Margin="0,0,16,0"/>
+                                  SelectedItem="{Binding SelectedMonth}" />
 
-                        <TextBlock Text="Year:"
-                                   VerticalAlignment="Center"
-                                   Margin="0,0,8,0"/>
-
+                        <TextBlock Text="Year:" Margin="16,0,6,0"/>
                         <ComboBox Width="100"
                                   ItemsSource="{Binding Years}"
-                                  SelectedItem="{Binding SelectedYear, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                  SelectedItem="{Binding SelectedYear}" />
                     </StackPanel>
 
-                    <!-- ========================= -->
-                    <!-- Totals Strip -->
-                    <!-- ========================= -->
-                    <Border Grid.Row="1"
-                            Padding="14"
-                            CornerRadius="8"
-                            BorderThickness="1"
-                            BorderBrush="#33000000"
+                    <!-- Totals -->
+                    <Border Grid.Row="1" Padding="12" CornerRadius="8"
+                            BorderThickness="1" BorderBrush="#33000000"
                             Margin="0,0,0,12">
-
                         <Grid>
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition/>
+                                <ColumnDefinition/>
+                                <ColumnDefinition/>
                             </Grid.ColumnDefinitions>
 
-                            <!-- Total Income -->
-                            <StackPanel Grid.Column="0">
-                                <TextBlock Text="Total Income"
-                                           Opacity="0.7"/>
+                            <StackPanel>
+                                <TextBlock Text="Total Income" Opacity="0.7"/>
                                 <TextBlock Text="{Binding TotalIncome, StringFormat=C}"
-                                           FontSize="20"
-                                           FontWeight="SemiBold"/>
+                                           FontSize="18" FontWeight="SemiBold"/>
                             </StackPanel>
 
-                            <!-- Total Expense -->
                             <StackPanel Grid.Column="1">
-                                <TextBlock Text="Total Expense"
-                                           Opacity="0.7"/>
+                                <TextBlock Text="Total Expense" Opacity="0.7"/>
                                 <TextBlock Text="{Binding TotalExpense, StringFormat=C}"
-                                           FontSize="20"
-                                           FontWeight="SemiBold"/>
+                                           FontSize="18" FontWeight="SemiBold"/>
                             </StackPanel>
 
-                            <!-- Net Total -->
                             <StackPanel Grid.Column="2">
-                                <TextBlock Text="Net Total"
-                                           Opacity="0.7"/>
+                                <TextBlock Text="Net Total" Opacity="0.7"/>
                                 <TextBlock Text="{Binding NetTotal, StringFormat=C}"
-                                           FontSize="20"
-                                           FontWeight="SemiBold"/>
+                                           FontSize="18" FontWeight="SemiBold"/>
                             </StackPanel>
                         </Grid>
                     </Border>
 
-                    <!-- ========================= -->
-                    <!-- Category Breakdown Grid -->
-                    <!-- ========================= -->
-                    <Grid Grid.Row="2">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
-                        </Grid.RowDefinitions>
+                    <!-- Category Breakdown -->
+                    <DataGrid Grid.Row="2"
+                              ItemsSource="{Binding CategorySummaries}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserAddRows="False">
 
-                        <TextBlock Text="Category Breakdown"
-                                   FontSize="16"
-                                   FontWeight="SemiBold"
-                                   Margin="0,0,0,8"/>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Category"
+                                                Binding="{Binding CategoryName}"
+                                                Width="2*" />
 
-                        <DataGrid Grid.Row="1"
-                                  ItemsSource="{Binding CategorySummaries}"
-                                  AutoGenerateColumns="False"
-                                  IsReadOnly="True"
-                                  CanUserAddRows="False"
-                                  Margin="0"
-                                  HeadersVisibility="Column"
-                                  GridLinesVisibility="Horizontal">
+                            <DataGridTextColumn Header="Income"
+                                                Binding="{Binding TotalIncome, StringFormat=C}" />
 
-                            <DataGrid.Columns>
-                                <DataGridTextColumn Header="Category"
-                                                    Binding="{Binding CategoryName}"
-                                                    Width="2*"/>
+                            <DataGridTextColumn Header="Expense"
+                                                Binding="{Binding TotalExpense, StringFormat=C}" />
 
-                                <DataGridTextColumn Header="Income"
-                                                    Binding="{Binding TotalIncome, StringFormat=C}"
-                                                    Width="*"/>
-
-                                <DataGridTextColumn Header="Expense"
-                                                    Binding="{Binding TotalExpense, StringFormat=C}"
-                                                    Width="*"/>
-
-                                <DataGridTextColumn Header="Net"
-                                                    Binding="{Binding NetAmount, StringFormat=C}"
-                                                    Width="*"/>
-                            </DataGrid.Columns>
-                        </DataGrid>
-                    </Grid>
+                            <DataGridTemplateColumn Header="Net">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding NetAmount, StringFormat=C}"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{Binding NetAmount, Converter={StaticResource NetBrush}}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
 
                 </Grid>
             </TabItem>
