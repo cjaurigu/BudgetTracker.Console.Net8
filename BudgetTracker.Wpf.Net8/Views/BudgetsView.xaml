@@ -14,7 +14,7 @@
             <Setter Property="HorizontalAlignment" Value="Right"/>
         </Style>
 
-        <!-- ✅ Local converters so this view NEVER depends on MainWindow resources -->
+        <!-- These converters should already exist in your project (used by Remaining + overspend row highlight). -->
         <conv:DecimalSignToBrushConverter x:Key="NetBrush" />
         <conv:DecimalIsNegativeConverter x:Key="IsNegative" />
     </UserControl.Resources>
@@ -38,8 +38,10 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
+                <!-- Top Row: Title + Search + Buttons -->
                 <Grid Grid.Row="0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
@@ -87,7 +89,18 @@
 
                         <Button Content="Clear Budget"
                                 Width="110"
+                                Margin="0,0,16,0"
                                 Command="{Binding ClearBudgetCommand}" />
+
+                        <!-- Requested buttons -->
+                        <Button Content="Preview Carry-Over"
+                                Width="150"
+                                Margin="0,0,8,0"
+                                Command="{Binding PreviewCarryOverCommand}" />
+
+                        <Button Content="Apply Carry-Over"
+                                Width="140"
+                                Command="{Binding ApplyCarryOverCommand}" />
                     </StackPanel>
                 </Grid>
 
@@ -106,10 +119,23 @@
                               SelectedItem="{Binding SelectedYear}" />
                 </StackPanel>
 
+                <!-- Requested TextBlock (preview output) -->
+                <Border Grid.Row="2"
+                        Margin="0,10,0,0"
+                        Padding="10"
+                        CornerRadius="6"
+                        BorderBrush="#EEE"
+                        BorderThickness="1"
+                        Background="#08000000">
+                    <TextBlock Text="{Binding CarryOverPreviewText}"
+                               TextWrapping="Wrap"
+                               FontSize="12"
+                               Opacity="0.9"/>
+                </Border>
             </Grid>
         </Border>
 
-        <!-- Grid -->
+        <!-- DataGrid -->
         <DataGrid Grid.Row="1"
                   Margin="0,10,0,0"
                   ItemsSource="{Binding BudgetRows}"
@@ -121,7 +147,7 @@
                   SelectionUnit="FullRow"
                   MouseDoubleClick="BudgetsGrid_MouseDoubleClick">
 
-            <!-- ✅ Highlight entire row when overspent -->
+            <!-- Highlight entire row when overspent -->
             <DataGrid.RowStyle>
                 <Style TargetType="DataGridRow">
                     <Style.Triggers>
@@ -135,18 +161,20 @@
             </DataGrid.RowStyle>
 
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Category" Width="2*"
+                <DataGridTextColumn Header="Category"
+                                    Width="2*"
                                     Binding="{Binding CategoryName}" />
 
-                <DataGridTextColumn Header="Budget" Width="140"
+                <DataGridTextColumn Header="Budget"
+                                    Width="140"
                                     Binding="{Binding BudgetAmount, StringFormat=C}"
                                     ElementStyle="{StaticResource RightAlignTextBlockStyle}" />
 
-                <DataGridTextColumn Header="Spent" Width="140"
+                <DataGridTextColumn Header="Spent"
+                                    Width="140"
                                     Binding="{Binding SpentAmount, StringFormat=C}"
                                     ElementStyle="{StaticResource RightAlignTextBlockStyle}" />
 
-                <!-- Remaining with red/green text -->
                 <DataGridTemplateColumn Header="Remaining" Width="140">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
