@@ -4,120 +4,155 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:BudgetTracker.Wpf.Net8.ViewModels"
+             xmlns:behaviors="clr-namespace:BudgetTracker.Wpf.Net8.Behaviors"
              mc:Ignorable="d"
-             d:DesignHeight="450" d:DesignWidth="800">
+             d:DesignHeight="450" d:DesignWidth="900">
 
-    <UserControl.Resources>
-        <!-- Right-align TextBlock content (used for currency column) -->
-        <Style x:Key="RightAlignTextBlockStyle" TargetType="{x:Type TextBlock}">
-            <Setter Property="HorizontalAlignment" Value="Right"/>
-        </Style>
-    </UserControl.Resources>
-
+    <!-- If you already set DataContext elsewhere, remove this line -->
     <UserControl.DataContext>
         <vm:TransactionsViewModel />
     </UserControl.DataContext>
 
-    <Grid Margin="12">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-        </Grid.RowDefinitions>
+    <DockPanel Margin="12">
 
-        <!-- Header + Buttons + Search -->
-        <Border Padding="10"
+        <!-- Top bar: Filters + Buttons -->
+        <Border DockPanel.Dock="Top"
+                Padding="10"
                 CornerRadius="8"
-                BorderBrush="#DDD"
+                BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
                 BorderThickness="1">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <TextBlock Grid.Column="0"
-                           Text="Transactions"
-                           FontSize="18"
-                           FontWeight="SemiBold"
-                           VerticalAlignment="Center"
-                           Margin="0,0,16,0"/>
+                <!-- Filters -->
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
+                    <TextBlock Text="Year:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <ComboBox Width="90"
+                              ItemsSource="{Binding Years}"
+                              SelectedItem="{Binding SelectedYear}"
+                              Margin="0,0,16,0"/>
 
-                <!-- Search -->
-                <StackPanel Grid.Column="1"
-                            Orientation="Horizontal"
-                            VerticalAlignment="Center">
-                    <TextBox Width="320"
-                             Height="28"
-                             VerticalContentAlignment="Center"
-                             Margin="0,0,8,0"
-                             Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                             ToolTip="Search Description or Category" />
-                    <Button Content="Clear"
-                            Width="80"
-                            Height="28"
-                            Command="{Binding ClearSearchCommand}" />
+                    <TextBlock Text="Month:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <ComboBox Width="140"
+                              ItemsSource="{Binding Months}"
+                              SelectedItem="{Binding SelectedMonth}"
+                              DisplayMemberPath="Display"
+                              Margin="0,0,16,0"/>
+
+                    <TextBlock Text="Category:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <ComboBox Width="200"
+                              ItemsSource="{Binding Categories}"
+                              SelectedItem="{Binding SelectedCategory}"
+                              DisplayMemberPath="Name"
+                              Margin="0,0,16,0"/>
+
+                    <Button Content="Clear Filters"
+                            Command="{Binding ClearFiltersCommand}"
+                            Padding="10,4"/>
                 </StackPanel>
 
-                <!-- Toolbar -->
-                <StackPanel Grid.Column="2"
-                            Orientation="Horizontal"
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Center">
-                    <Button Content="Refresh"
-                            Width="90"
-                            Margin="0,0,8,0"
-                            Command="{Binding RefreshCommand}" />
-
-                    <Button Content="Add"
-                            Width="90"
-                            Margin="0,0,8,0"
-                            Command="{Binding AddTransactionCommand}" />
-
-                    <Button Content="Edit"
-                            Width="90"
-                            Margin="0,0,8,0"
-                            Command="{Binding EditSelectedCommand}" />
-
-                    <Button Content="Delete"
-                            Width="90"
-                            Command="{Binding DeleteSelectedCommand}" />
+                <!-- Buttons -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="Refresh" Command="{Binding RefreshCommand}" Padding="10,4" Margin="0,0,8,0"/>
+                    <Button Content="Add" Command="{Binding AddTransactionCommand}" Padding="10,4" Margin="0,0,8,0"/>
+                    <Button Content="Edit (Dialog)" Command="{Binding EditSelectedCommand}" Padding="10,4" Margin="0,0,8,0"/>
+                    <Button Content="Delete Selected" Command="{Binding DeleteSelectedCommand}" Padding="10,4"/>
                 </StackPanel>
             </Grid>
         </Border>
 
-        <!-- DataGrid -->
-        <DataGrid Grid.Row="1"
-                  Margin="0,10,0,0"
+        <!-- Data Grid (INLINE EDIT ENABLED) -->
+        <DataGrid Margin="0,12,0,0"
                   ItemsSource="{Binding Transactions}"
                   SelectedItem="{Binding SelectedTransaction, Mode=TwoWay}"
+                  behaviors:DataGridSelectedItemsBehavior.SelectedItems="{Binding SelectedTransactions, Mode=TwoWay}"
                   AutoGenerateColumns="False"
-                  IsReadOnly="True"
                   CanUserAddRows="False"
-                  SelectionMode="Single"
+                  IsReadOnly="False"
+                  SelectionMode="Extended"
                   SelectionUnit="FullRow"
-                  MouseDoubleClick="TransactionsGrid_MouseDoubleClick">
+                  RowEditEnding="TransactionsGrid_RowEditEnding"
+                  PreviewKeyDown="TransactionsGrid_PreviewKeyDown">
 
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Id" Width="60"
-                                    Binding="{Binding Id}" />
 
-                <DataGridTextColumn Header="Date" Width="120"
-                                    Binding="{Binding Date, StringFormat=yyyy-MM-dd}" />
+                <!-- Id is read-only -->
+                <DataGridTextColumn Header="Id"
+                                    Binding="{Binding Id}"
+                                    IsReadOnly="True"
+                                    Width="60" />
 
-                <DataGridTextColumn Header="Type" Width="100"
-                                    Binding="{Binding Type}" />
+                <!-- Date (DatePicker editor) -->
+                <DataGridTemplateColumn Header="Date" Width="140">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Date, StringFormat={}{0:yyyy-MM-dd}}"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
 
-                <DataGridTextColumn Header="Category" Width="160"
-                                    Binding="{Binding Category}" />
+                    <DataGridTemplateColumn.CellEditingTemplate>
+                        <DataTemplate>
+                            <DatePicker SelectedDate="{Binding Date, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                        SelectedDateFormat="Short"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellEditingTemplate>
+                </DataGridTemplateColumn>
 
-                <DataGridTextColumn Header="Description" Width="*"
-                                    Binding="{Binding Description}" />
+                <!-- Type (ComboBox editor) -->
+                <DataGridTemplateColumn Header="Type" Width="120">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Type}"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
 
-                <DataGridTextColumn Header="Amount" Width="120"
-                                    Binding="{Binding Amount, StringFormat=C}"
-                                    ElementStyle="{StaticResource RightAlignTextBlockStyle}" />
+                    <DataGridTemplateColumn.CellEditingTemplate>
+                        <DataTemplate>
+                            <ComboBox SelectedItem="{Binding Type, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                                <ComboBoxItem Content="Expense"/>
+                                <ComboBoxItem Content="Income"/>
+                            </ComboBox>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellEditingTemplate>
+                </DataGridTemplateColumn>
+
+                <!-- Category (ComboBox editor, writes CategoryId) -->
+                <DataGridTemplateColumn Header="Category" Width="220">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Category}"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+
+                    <DataGridTemplateColumn.CellEditingTemplate>
+                        <DataTemplate>
+                            <ComboBox ItemsSource="{Binding DataContext.EditableCategories, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                      DisplayMemberPath="Name"
+                                      SelectedValuePath="Id"
+                                      SelectedValue="{Binding CategoryId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellEditingTemplate>
+                </DataGridTemplateColumn>
+
+                <!-- Description -->
+                <DataGridTextColumn Header="Description"
+                                    Binding="{Binding Description, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                                    Width="*" />
+
+                <!-- Amount -->
+                <DataGridTextColumn Header="Amount"
+                                    Binding="{Binding Amount, Mode=TwoWay, UpdateSourceTrigger=LostFocus, StringFormat={}{0:0.00}}"
+                                    Width="120" />
+
             </DataGrid.Columns>
         </DataGrid>
-    </Grid>
+
+        <TextBlock DockPanel.Dock="Bottom"
+                   Margin="2,8,0,0"
+                   Opacity="0.7"
+                   Text="Tip: You can edit cells directly. Press Enter to commit a row. Hold Ctrl/Shift to multi-select for delete."/>
+    </DockPanel>
 </UserControl>
