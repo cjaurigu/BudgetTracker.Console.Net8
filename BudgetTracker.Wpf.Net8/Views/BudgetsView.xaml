@@ -1,0 +1,163 @@
+﻿<UserControl x:Class="BudgetTracker.Wpf.Net8.Views.BudgetsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:BudgetTracker.Wpf.Net8.ViewModels"
+             xmlns:conv="clr-namespace:BudgetTracker.Wpf.Net8.Converters"
+             mc:Ignorable="d"
+             d:DesignHeight="450" d:DesignWidth="800">
+
+    <UserControl.Resources>
+        <!-- Right aligned currency cells -->
+        <Style x:Key="RightAlignTextBlockStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+        </Style>
+
+        <!-- ✅ Local converters so this view NEVER depends on MainWindow resources -->
+        <conv:DecimalSignToBrushConverter x:Key="NetBrush" />
+        <conv:DecimalIsNegativeConverter x:Key="IsNegative" />
+    </UserControl.Resources>
+
+    <UserControl.DataContext>
+        <vm:BudgetsViewModel />
+    </UserControl.DataContext>
+
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header / Filters / Buttons -->
+        <Border Padding="10"
+                CornerRadius="8"
+                BorderBrush="#DDD"
+                BorderThickness="1">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0"
+                               Text="Budgets"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               Margin="0,0,16,0"/>
+
+                    <!-- Search -->
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center">
+                        <TextBox Width="320"
+                                 Height="28"
+                                 VerticalContentAlignment="Center"
+                                 Margin="0,0,8,0"
+                                 Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="Search category name" />
+                        <Button Content="Clear"
+                                Width="80"
+                                Height="28"
+                                Command="{Binding ClearSearchCommand}" />
+                    </StackPanel>
+
+                    <!-- Buttons -->
+                    <StackPanel Grid.Column="2"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center">
+                        <Button Content="Refresh"
+                                Width="90"
+                                Margin="0,0,8,0"
+                                Command="{Binding RefreshCommand}" />
+
+                        <Button Content="Edit"
+                                Width="90"
+                                Margin="0,0,8,0"
+                                Command="{Binding EditSelectedCommand}" />
+
+                        <Button Content="Clear Budget"
+                                Width="110"
+                                Command="{Binding ClearBudgetCommand}" />
+                    </StackPanel>
+                </Grid>
+
+                <!-- Month / Year -->
+                <StackPanel Grid.Row="1"
+                            Orientation="Horizontal"
+                            Margin="0,10,0,0">
+                    <TextBlock Text="Month:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <ComboBox Width="80"
+                              ItemsSource="{Binding Months}"
+                              SelectedItem="{Binding SelectedMonth}" />
+
+                    <TextBlock Text="Year:" VerticalAlignment="Center" Margin="16,0,6,0"/>
+                    <ComboBox Width="110"
+                              ItemsSource="{Binding Years}"
+                              SelectedItem="{Binding SelectedYear}" />
+                </StackPanel>
+
+            </Grid>
+        </Border>
+
+        <!-- Grid -->
+        <DataGrid Grid.Row="1"
+                  Margin="0,10,0,0"
+                  ItemsSource="{Binding BudgetRows}"
+                  SelectedItem="{Binding SelectedRow, Mode=TwoWay}"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  CanUserAddRows="False"
+                  SelectionMode="Single"
+                  SelectionUnit="FullRow"
+                  MouseDoubleClick="BudgetsGrid_MouseDoubleClick">
+
+            <!-- ✅ Highlight entire row when overspent -->
+            <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding RemainingAmount, Converter={StaticResource IsNegative}}" Value="True">
+                            <Setter Property="Background" Value="#30FF0000" />
+                            <Setter Property="BorderBrush" Value="#55FF0000" />
+                            <Setter Property="BorderThickness" Value="1" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.RowStyle>
+
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Category" Width="2*"
+                                    Binding="{Binding CategoryName}" />
+
+                <DataGridTextColumn Header="Budget" Width="140"
+                                    Binding="{Binding BudgetAmount, StringFormat=C}"
+                                    ElementStyle="{StaticResource RightAlignTextBlockStyle}" />
+
+                <DataGridTextColumn Header="Spent" Width="140"
+                                    Binding="{Binding SpentAmount, StringFormat=C}"
+                                    ElementStyle="{StaticResource RightAlignTextBlockStyle}" />
+
+                <!-- Remaining with red/green text -->
+                <DataGridTemplateColumn Header="Remaining" Width="140">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding RemainingAmount, StringFormat=C}"
+                                       FontWeight="SemiBold"
+                                       HorizontalAlignment="Right"
+                                       Foreground="{Binding RemainingAmount, Converter={StaticResource NetBrush}}" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>

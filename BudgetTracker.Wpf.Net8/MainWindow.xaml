@@ -15,20 +15,18 @@
     <Grid>
         <TabControl>
 
-            <!-- ================= Transactions ================= -->
             <TabItem Header="Transactions">
                 <views:TransactionsView />
             </TabItem>
 
-            <!-- ================= Categories ================= -->
             <TabItem Header="Categories">
                 <views:CategoriesView />
             </TabItem>
 
-            <!-- ================= Budgets (placeholder for now) ================= -->
-            <TabItem Header="Budgets" />
+            <TabItem Header="Budgets">
+                <views:BudgetsView />
+            </TabItem>
 
-            <!-- ================= Summary ================= -->
             <TabItem Header="Summary">
                 <TabItem.DataContext>
                     <vm:SummaryViewModel />
@@ -41,7 +39,6 @@
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <!-- Month / Year -->
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                         <TextBlock Text="Month:" Margin="0,0,6,0"/>
                         <ComboBox Width="80"
@@ -54,7 +51,6 @@
                                   SelectedItem="{Binding SelectedYear}" />
                     </StackPanel>
 
-                    <!-- Totals -->
                     <Border Grid.Row="1" Padding="12" CornerRadius="8"
                             BorderThickness="1" BorderBrush="#33000000"
                             Margin="0,0,0,12">
@@ -85,7 +81,6 @@
                         </Grid>
                     </Border>
 
-                    <!-- Category Breakdown -->
                     <DataGrid Grid.Row="2"
                               ItemsSource="{Binding CategorySummaries}"
                               AutoGenerateColumns="False"
