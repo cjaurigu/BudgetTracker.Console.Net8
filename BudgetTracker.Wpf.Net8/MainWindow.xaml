@@ -20,7 +20,12 @@
                 <views:TransactionsView />
             </TabItem>
 
-            <TabItem Header="Categories" />
+            <!-- ================= Categories ================= -->
+            <TabItem Header="Categories">
+                <views:CategoriesView />
+            </TabItem>
+
+            <!-- ================= Budgets (placeholder for now) ================= -->
             <TabItem Header="Budgets" />
 
             <!-- ================= Summary ================= -->
