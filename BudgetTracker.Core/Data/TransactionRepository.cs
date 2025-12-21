@@ -6,6 +6,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Data;
 using Microsoft.Data.SqlClient;
 using BudgetTracker.Console.Net8.Domain;
 
@@ -144,6 +145,7 @@ namespace BudgetTracker.Console.Net8.Data
 
         /// <summary>
         /// Returns a single transaction by Id, or null if not found.
+        /// Uses Categories join so Category text reflects current CategoryId.
         /// </summary>
         public Transaction? GetById(int id)
         {
@@ -151,9 +153,17 @@ namespace BudgetTracker.Console.Net8.Data
             connection.Open();
 
             const string sql = @"
-                SELECT Id, Description, Amount, Type, Category, CategoryId, Date
-                FROM Transactions
-                WHERE Id = @Id;";
+                SELECT
+                    t.Id,
+                    t.Description,
+                    t.Amount,
+                    t.Type,
+                    ISNULL(c.Name, t.Category) AS Category,
+                    t.CategoryId,
+                    t.Date
+                FROM Transactions t
+                LEFT JOIN Categories c ON t.CategoryId = c.Id
+                WHERE t.Id = @Id;";
 
             using var command = new SqlCommand(sql, connection);
             command.Parameters.AddWithValue("@Id", id);
@@ -171,6 +181,7 @@ namespace BudgetTracker.Console.Net8.Data
 
         /// <summary>
         /// Returns all transactions ordered by Date DESC, then Id DESC.
+        /// Uses Categories join so Category text reflects current CategoryId.
         /// </summary>
         public List<Transaction> GetAll()
         {
@@ -180,9 +191,17 @@ namespace BudgetTracker.Console.Net8.Data
             connection.Open();
 
             const string sql = @"
-                SELECT Id, Description, Amount, Type, Category, CategoryId, Date
-                FROM Transactions
-                ORDER BY Date DESC, Id DESC;";
+                SELECT
+                    t.Id,
+                    t.Description,
+                    t.Amount,
+                    t.Type,
+                    ISNULL(c.Name, t.Category) AS Category,
+                    t.CategoryId,
+                    t.Date
+                FROM Transactions t
+                LEFT JOIN Categories c ON t.CategoryId = c.Id
+                ORDER BY t.Date DESC, t.Id DESC;";
 
             using var command = new SqlCommand(sql, connection);
             using var reader = command.ExecuteReader();
@@ -277,6 +296,41 @@ namespace BudgetTracker.Console.Net8.Data
             }
 
             return results;
+        }
+
+        // -----------------------------------------------------------
+        // CATEGORY REASSIGNMENT
+        // -----------------------------------------------------------
+
+        /// <summary>
+        /// Reassigns all transactions from one CategoryId to another.
+        /// Also updates the legacy Category text field to match the new category name.
+        /// </summary>
+        public void ReassignCategory(int fromCategoryId, int toCategoryId)
+        {
+            if (fromCategoryId <= 0)
+                throw new ArgumentException("fromCategoryId must be > 0.", nameof(fromCategoryId));
+
+            if (toCategoryId <= 0)
+                throw new ArgumentException("toCategoryId must be > 0.", nameof(toCategoryId));
+
+            using var connection = new SqlConnection(_connectionString);
+            connection.Open();
+
+            const string sql = @"
+                UPDATE t
+                SET
+                    t.CategoryId = @ToCategoryId,
+                    t.Category   = ISNULL(cTo.Name, t.Category)
+                FROM Transactions t
+                LEFT JOIN Categories cTo ON cTo.Id = @ToCategoryId
+                WHERE t.CategoryId = @FromCategoryId;";
+
+            using var command = new SqlCommand(sql, connection);
+            command.Parameters.AddWithValue("@FromCategoryId", fromCategoryId);
+            command.Parameters.AddWithValue("@ToCategoryId", toCategoryId);
+
+            command.ExecuteNonQuery();
         }
 
         // -----------------------------------------------------------
