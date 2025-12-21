@@ -5,8 +5,10 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Windows;
 using BudgetTracker.Console.Net8.Data;
+using BudgetTracker.Console.Net8.Domain;
 using BudgetTracker.Console.Net8.Services;
 using BudgetTracker.Wpf.Net8.Views;
 
@@ -17,6 +19,7 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
         private readonly BudgetPlanService _budgetPlanService;
         private readonly CategoryRepository _categoryRepo;
         private readonly BudgetService _budgetService;
+        private readonly BudgetCarryOverService _carryOverService;
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -36,6 +39,7 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
                     _selectedMonth = value;
                     OnPropertyChanged();
                     Refresh();
+                    ClearCarryOverPreview();
                 }
             }
         }
@@ -51,6 +55,7 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
                     _selectedYear = value;
                     OnPropertyChanged();
                     Refresh();
+                    ClearCarryOverPreview();
                 }
             }
         }
@@ -89,10 +94,34 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             }
         }
 
+        // -----------------------------
+        // Carry-over preview (UI text)
+        // -----------------------------
+        private string _carryOverPreviewText = string.Empty;
+        public string CarryOverPreviewText
+        {
+            get => _carryOverPreviewText;
+            set { _carryOverPreviewText = value; OnPropertyChanged(); }
+        }
+
+        private decimal _carryOverPreviewTotal;
+        public decimal CarryOverPreviewTotal
+        {
+            get => _carryOverPreviewTotal;
+            set { _carryOverPreviewTotal = value; OnPropertyChanged(); }
+        }
+
+        // -----------------------------
+        // Commands
+        // -----------------------------
         public RelayCommand RefreshCommand { get; }
         public RelayCommand EditSelectedCommand { get; }
         public RelayCommand ClearBudgetCommand { get; }
         public RelayCommand ClearSearchCommand { get; }
+
+        // Phase D
+        public RelayCommand PreviewCarryOverCommand { get; }
+        public RelayCommand ApplyCarryOverCommand { get; }
 
         public BudgetsViewModel()
         {
@@ -105,6 +134,12 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
 
             _budgetService = new BudgetService(new TransactionRepository());
 
+            _carryOverService = new BudgetCarryOverService(
+                _budgetPlanService,
+                _budgetService,
+                _categoryRepo,
+                new BudgetCarryOverRunRepository());
+
             var now = DateTime.Now;
             _selectedMonth = now.Month;
             _selectedYear = now.Year;
@@ -115,6 +150,9 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             EditSelectedCommand = new RelayCommand(OpenEditDialog, () => SelectedRow != null);
             ClearBudgetCommand = new RelayCommand(ClearSelectedBudget, () => SelectedRow != null);
             ClearSearchCommand = new RelayCommand(ClearSearch, () => !string.IsNullOrWhiteSpace(SearchText));
+
+            PreviewCarryOverCommand = new RelayCommand(PreviewCarryOver);
+            ApplyCarryOverCommand = new RelayCommand(ApplyCarryOver);
 
             Refresh();
         }
@@ -168,17 +206,14 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
                 SelectedRow = null;
         }
 
-        private void ClearSearch()
-        {
-            SearchText = string.Empty;
-        }
+        private void ClearSearch() => SearchText = string.Empty;
 
         private void OpenEditDialog()
         {
             if (SelectedRow == null)
                 return;
 
-            // PHASE C: warn if this category/month already has spending
+            // Phase C: warn if this category/month already has spending
             if (!ConfirmEditingBudgetIfSpendingExists())
                 return;
 
@@ -197,6 +232,7 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             {
                 _budgetPlanService.SetMonthlyBudget(SelectedRow.CategoryId, SelectedYear, SelectedMonth, win.BudgetAmount);
                 Refresh();
+                ClearCarryOverPreview();
             }
             catch (Exception ex)
             {
@@ -209,7 +245,6 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             if (SelectedRow == null)
                 return;
 
-            // PHASE C: warn if spending exists
             if (!ConfirmEditingBudgetIfSpendingExists())
                 return;
 
@@ -226,6 +261,7 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             {
                 _budgetPlanService.DeleteMonthlyBudget(SelectedRow.CategoryId, SelectedYear, SelectedMonth);
                 Refresh();
+                ClearCarryOverPreview();
             }
             catch (Exception ex)
             {
@@ -259,6 +295,103 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
                 MessageBoxImage.Warning);
 
             return choice == MessageBoxResult.Yes;
+        }
+
+        // -----------------------------
+        // Phase D: Carry-over
+        // -----------------------------
+        private void PreviewCarryOver()
+        {
+            try
+            {
+                var lines = _carryOverService.PreviewCarryOver(SelectedYear, SelectedMonth);
+                var total = lines.Sum(x => x.CarryOverAmount);
+
+                CarryOverPreviewTotal = total;
+
+                if (lines.Count == 0 || total <= 0m)
+                {
+                    CarryOverPreviewText = "No unused budget to carry over for this month.";
+                    return;
+                }
+
+                var sb = new StringBuilder();
+                sb.AppendLine($"Carry-over preview for {SelectedYear}/{SelectedMonth:00}:");
+                sb.AppendLine();
+                foreach (var line in lines.Take(15))
+                {
+                    sb.AppendLine($"{line.CategoryName}: {line.CarryOverAmount.ToString("C", CultureInfo.CurrentCulture)}");
+                }
+
+                if (lines.Count > 15)
+                    sb.AppendLine($"…and {lines.Count - 15} more categories.");
+
+                sb.AppendLine();
+                sb.AppendLine($"Total to Savings: {total.ToString("C", CultureInfo.CurrentCulture)}");
+
+                CarryOverPreviewText = sb.ToString();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Carry-over Preview Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void ApplyCarryOver()
+        {
+            try
+            {
+                // Always preview first (so user sees what will happen)
+                var lines = _carryOverService.PreviewCarryOver(SelectedYear, SelectedMonth);
+                var total = lines.Sum(x => x.CarryOverAmount);
+
+                if (total <= 0m)
+                {
+                    MessageBox.Show(
+                        "No unused budget to carry over for this month.",
+                        "Carry-over",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                    return;
+                }
+
+                var nextMonthDate = new DateTime(SelectedYear, SelectedMonth, 1).AddMonths(1);
+                var msg =
+                    $"This will create an Income transaction in \"Savings\" dated {nextMonthDate:yyyy-MM-dd}.\n\n" +
+                    $"Total carry-over: {total.ToString("C", CultureInfo.CurrentCulture)}\n\n" +
+                    $"Apply carry-over now?";
+
+                var confirm = MessageBox.Show(
+                    msg,
+                    "Apply Carry-over",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+
+                if (confirm != MessageBoxResult.Yes)
+                    return;
+
+                var appliedTotal = _carryOverService.ApplyCarryOverToSavings(SelectedYear, SelectedMonth);
+
+                MessageBox.Show(
+                    $"Carry-over applied!\n\nSavings +{appliedTotal.ToString("C", CultureInfo.CurrentCulture)}",
+                    "Carry-over Complete",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+
+                // Refresh budgets (spent won't change, but this keeps UI consistent)
+                Refresh();
+                ClearCarryOverPreview();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Carry-over Apply Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void ClearCarryOverPreview()
+        {
+            CarryOverPreviewTotal = 0m;
+            CarryOverPreviewText = string.Empty;
         }
 
         private void OnPropertyChanged([CallerMemberName] string? name = null)
