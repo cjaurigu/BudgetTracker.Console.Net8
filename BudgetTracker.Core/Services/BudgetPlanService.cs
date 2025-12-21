@@ -109,5 +109,28 @@ namespace BudgetTracker.Console.Net8.Services
         {
             return _budgetRepo.GetAllWithCategoryNames();
         }
+
+        // ---------------------------------------------------------
+        // PHASE A ADDITIONS (Overspend checks)
+        // ---------------------------------------------------------
+
+        /// <summary>
+        /// Tries to fetch the saved budget amount for the given category.
+        /// Returns true if a budget exists; otherwise false.
+        /// </summary>
+        public bool TryGetBudgetAmount(int categoryId, out decimal budgetAmount)
+        {
+            budgetAmount = 0m;
+
+            if (categoryId <= 0)
+                return false;
+
+            var budget = _budgetRepo.GetByCategoryId(categoryId);
+            if (budget == null)
+                return false;
+
+            budgetAmount = budget.BudgetAmount;
+            return true;
+        }
     }
 }

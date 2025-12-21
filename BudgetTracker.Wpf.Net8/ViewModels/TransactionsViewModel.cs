@@ -1,5 +1,7 @@
-﻿using System.Collections.ObjectModel;
+﻿using System;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Windows;
@@ -20,6 +22,7 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
     public sealed class TransactionsViewModel : INotifyPropertyChanged
     {
         private readonly BudgetService _budgetService;
+        private readonly BudgetPlanService _budgetPlanService;
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -83,8 +86,12 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
         public TransactionsViewModel()
         {
             // Uses your existing ADO.NET repository + service
-            var repo = new TransactionRepository();
-            _budgetService = new BudgetService(repo);
+            var txRepo = new TransactionRepository();
+            _budgetService = new BudgetService(txRepo);
+
+            // Budget read access for overspend warnings (Phase A)
+            var categoryRepo = new CategoryRepository();
+            _budgetPlanService = new BudgetPlanService(new CategoryBudgetRepository(), categoryRepo);
 
             RefreshCommand = new RelayCommand(Refresh);
             AddTransactionCommand = new RelayCommand(OpenAddDialog);
@@ -146,7 +153,13 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
 
             if (window.DataContext is AddTransactionViewModel vm && vm.CreatedTransaction != null)
             {
-                _budgetService.AddTransaction(vm.CreatedTransaction);
+                var pending = vm.CreatedTransaction;
+
+                // PHASE A: Overspend warning (Expense only)
+                if (!ConfirmOverspendIfNeeded(pending, excludeTransactionId: null))
+                    return;
+
+                _budgetService.AddTransaction(pending);
                 ApplySearch(); // keep current filter applied
             }
         }
@@ -171,7 +184,7 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
                 vm.Description = SelectedTransaction.Description;
                 vm.AmountText = SelectedTransaction.Amount.ToString();
 
-                vm.SelectedType = SelectedTransaction.Type.Equals("Income", System.StringComparison.OrdinalIgnoreCase)
+                vm.SelectedType = SelectedTransaction.Type.Equals("Income", StringComparison.OrdinalIgnoreCase)
                     ? TransactionType.Income
                     : TransactionType.Expense;
 
@@ -185,7 +198,7 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
                 if (vm.SelectedCategory == null && !string.IsNullOrWhiteSpace(SelectedTransaction.Category))
                 {
                     var matchByName = vm.Categories.FirstOrDefault(c =>
-                        c.Name.Equals(SelectedTransaction.Category, System.StringComparison.OrdinalIgnoreCase));
+                        c.Name.Equals(SelectedTransaction.Category, StringComparison.OrdinalIgnoreCase));
 
                     if (matchByName != null)
                         vm.SelectedCategory = matchByName;
@@ -202,6 +215,11 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
 
                 // CRITICAL: keep original Id so UPDATE happens
                 updated.Id = SelectedTransaction.Id;
+
+                // PHASE A: Overspend warning (Expense only)
+                // For edit: exclude this transaction so we don't double-count it in "spent so far"
+                if (!ConfirmOverspendIfNeeded(updated, excludeTransactionId: SelectedTransaction.Id))
+                    return;
 
                 _budgetService.UpdateTransaction(updated);
                 ApplySearch(); // keep current filter applied
@@ -227,6 +245,60 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
 
             _budgetService.DeleteTransaction(SelectedTransaction.Id);
             ApplySearch(); // keep current filter applied
+        }
+
+        // -----------------------------
+        // PHASE A: Overspend warning helper
+        // -----------------------------
+        private bool ConfirmOverspendIfNeeded(Transaction pending, int? excludeTransactionId)
+        {
+            if (pending == null)
+                return true;
+
+            // Only warn for Expense
+            if (pending.Type == null || !pending.Type.Equals("Expense", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // Need a CategoryId to check budget reliably
+            if (!pending.CategoryId.HasValue || pending.CategoryId.Value <= 0)
+                return true;
+
+            var categoryId = pending.CategoryId.Value;
+
+            // If no budget exists for this category, don't warn
+            if (!_budgetPlanService.TryGetBudgetAmount(categoryId, out var budgetAmount))
+                return true;
+
+            // Determine month/year from transaction date (this matches how your Budgets tab uses SelectedMonth/Year)
+            var year = pending.Date.Year;
+            var month = pending.Date.Month;
+
+            // Spent so far in this category for this month (excluding the transaction being edited if applicable)
+            var spentSoFar = _budgetService.GetTotalExpensesForCategoryMonth(categoryId, year, month, excludeTransactionId);
+
+            // Projected spend after this save
+            var projected = spentSoFar + pending.Amount;
+
+            if (projected <= budgetAmount)
+                return true;
+
+            var overBy = projected - budgetAmount;
+
+            var msg =
+                $"This expense will exceed the budget for \"{pending.Category}\".\n\n" +
+                $"Budget: {budgetAmount.ToString("C", CultureInfo.CurrentCulture)}\n" +
+                $"Spent (so far): {spentSoFar.ToString("C", CultureInfo.CurrentCulture)}\n" +
+                $"After this: {projected.ToString("C", CultureInfo.CurrentCulture)}\n\n" +
+                $"Over by: {overBy.ToString("C", CultureInfo.CurrentCulture)}\n\n" +
+                $"Do you want to continue?";
+
+            var choice = MessageBox.Show(
+                msg,
+                "Budget Overspend Warning",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            return choice == MessageBoxResult.Yes;
         }
 
         private void OnPropertyChanged([CallerMemberName] string? propName = null)

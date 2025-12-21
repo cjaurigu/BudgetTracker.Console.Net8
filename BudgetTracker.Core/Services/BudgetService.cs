@@ -192,6 +192,41 @@ namespace BudgetTracker.Console.Net8.Services
         }
 
         // -----------------------------------------------------------
+        // PHASE A ADDITIONS (Overspend checks)
+        // -----------------------------------------------------------
+
+        /// <summary>
+        /// Returns total EXPENSE spending for a given category and month.
+        /// Optional excludeTransactionId is used for Edit scenarios so we don't double-count.
+        /// </summary>
+        public decimal GetTotalExpensesForCategoryMonth(int categoryId, int year, int month, int? excludeTransactionId = null)
+        {
+            if (categoryId <= 0)
+                return 0m;
+
+            if (month < 1 || month > 12)
+                throw new ArgumentOutOfRangeException(nameof(month), "Month must be between 1 and 12.");
+
+            if (year < 1)
+                throw new ArgumentOutOfRangeException(nameof(year), "Year must be greater than 0.");
+
+            // NOTE: Phase A keeps it simple by using existing repository GetAll() and filtering in memory.
+            // When we move to Monthly Budgets (Phase B), we can optimize with a targeted SQL query if needed.
+            var all = _repository.GetAll();
+
+            return all
+                .Where(t =>
+                    t.CategoryId.HasValue &&
+                    t.CategoryId.Value == categoryId &&
+                    t.Date.Year == year &&
+                    t.Date.Month == month &&
+                    t.Type != null &&
+                    t.Type.Equals("Expense", StringComparison.OrdinalIgnoreCase) &&
+                    (!excludeTransactionId.HasValue || t.Id != excludeTransactionId.Value))
+                .Sum(t => t.Amount);
+        }
+
+        // -----------------------------------------------------------
         // CATEGORY SUMMARIES
         // -----------------------------------------------------------
 
