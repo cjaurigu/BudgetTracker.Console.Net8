@@ -2,9 +2,10 @@
 // Namespace: BudgetTracker.Console.Net8.Services
 //
 // Purpose:
-// Business logic for managing category budgets (Phase 1: one budget per category).
-// This service validates inputs, checks category existence, and delegates SQL work
-// to CategoryBudgetRepository.
+// Business logic for managing budgets.
+// - Phase 1: default budget per category (CategoryBudgets)
+// - Phase B: monthly budget per category (MonthlyCategoryBudgets)
+// - Phase C: change history logging (BudgetChangeLog)
 
 using System;
 using System.Collections.Generic;
@@ -13,35 +14,37 @@ using BudgetTracker.Console.Net8.Domain;
 
 namespace BudgetTracker.Console.Net8.Services
 {
-    /// <summary>
-    /// Handles business rules around budgets (set/update/delete/view).
-    /// Phase 1 design: each category can have only one budget amount.
-    /// </summary>
     public class BudgetPlanService
     {
-        private readonly CategoryBudgetRepository _budgetRepo;
+        private readonly CategoryBudgetRepository _budgetRepo;                 // Phase 1 (defaults)
+        private readonly MonthlyCategoryBudgetRepository _monthlyBudgetRepo;   // Phase B (per-month)
+        private readonly BudgetChangeLogRepository _changeLogRepo;             // Phase C (history)
         private readonly CategoryRepository _categoryRepo;
 
-        /// <summary>
-        /// Creates the service with the required repositories.
-        /// </summary>
-        public BudgetPlanService(CategoryBudgetRepository budgetRepo, CategoryRepository categoryRepo)
+        // Backward-compatible constructor (used by your WPF code today)
+        public BudgetPlanService(
+            CategoryBudgetRepository budgetRepo,
+            MonthlyCategoryBudgetRepository monthlyBudgetRepo,
+            CategoryRepository categoryRepo)
+            : this(budgetRepo, monthlyBudgetRepo, new BudgetChangeLogRepository(), categoryRepo)
+        {
+        }
+
+        public BudgetPlanService(
+            CategoryBudgetRepository budgetRepo,
+            MonthlyCategoryBudgetRepository monthlyBudgetRepo,
+            BudgetChangeLogRepository changeLogRepo,
+            CategoryRepository categoryRepo)
         {
             _budgetRepo = budgetRepo ?? throw new ArgumentNullException(nameof(budgetRepo));
+            _monthlyBudgetRepo = monthlyBudgetRepo ?? throw new ArgumentNullException(nameof(monthlyBudgetRepo));
+            _changeLogRepo = changeLogRepo ?? throw new ArgumentNullException(nameof(changeLogRepo));
             _categoryRepo = categoryRepo ?? throw new ArgumentNullException(nameof(categoryRepo));
         }
 
         // ---------------------------------------------------------
-        // SET / UPDATE
+        // PHASE 1 (Defaults) - kept for later features
         // ---------------------------------------------------------
-
-        /// <summary>
-        /// Sets or updates a budget for a category.
-        /// If a budget already exists for that category, it updates it.
-        /// If not, it inserts a new budget row.
-        /// </summary>
-        /// <param name="categoryId">The Categories.Id value.</param>
-        /// <param name="amount">Budget amount (must be >= 0).</param>
         public void SetBudget(int categoryId, decimal amount)
         {
             if (categoryId <= 0)
@@ -50,7 +53,6 @@ namespace BudgetTracker.Console.Net8.Services
             if (amount < 0)
                 throw new ArgumentException("Budget amount must be zero or positive.", nameof(amount));
 
-            // Important rule: don’t allow budgets for categories that don’t exist.
             var category = _categoryRepo.GetById(categoryId);
             if (category == null)
                 throw new InvalidOperationException($"Category does not exist (Id: {categoryId}).");
@@ -67,18 +69,10 @@ namespace BudgetTracker.Console.Net8.Services
             }
             else
             {
-                // Keeps UPDATE logic centralized in the repository.
                 _budgetRepo.UpdateByCategoryId(categoryId, amount);
             }
         }
 
-        // ---------------------------------------------------------
-        // DELETE
-        // ---------------------------------------------------------
-
-        /// <summary>
-        /// Deletes the budget for a category (if it exists).
-        /// </summary>
         public void DeleteBudget(int categoryId)
         {
             if (categoryId <= 0)
@@ -87,13 +81,6 @@ namespace BudgetTracker.Console.Net8.Services
             _budgetRepo.DeleteByCategoryId(categoryId);
         }
 
-        // ---------------------------------------------------------
-        // GETTERS
-        // ---------------------------------------------------------
-
-        /// <summary>
-        /// Returns the raw budget record for a category, or null if not found.
-        /// </summary>
         public CategoryBudget? GetBudget(int categoryId)
         {
             if (categoryId <= 0)
@@ -102,22 +89,9 @@ namespace BudgetTracker.Console.Net8.Services
             return _budgetRepo.GetByCategoryId(categoryId);
         }
 
-        /// <summary>
-        /// Returns all budgets joined with category names (ideal for UI display).
-        /// </summary>
         public List<CategoryBudgetView> GetAllBudgetsWithNames()
-        {
-            return _budgetRepo.GetAllWithCategoryNames();
-        }
+            => _budgetRepo.GetAllWithCategoryNames();
 
-        // ---------------------------------------------------------
-        // PHASE A ADDITIONS (Overspend checks)
-        // ---------------------------------------------------------
-
-        /// <summary>
-        /// Tries to fetch the saved budget amount for the given category.
-        /// Returns true if a budget exists; otherwise false.
-        /// </summary>
         public bool TryGetBudgetAmount(int categoryId, out decimal budgetAmount)
         {
             budgetAmount = 0m;
@@ -131,6 +105,116 @@ namespace BudgetTracker.Console.Net8.Services
 
             budgetAmount = budget.BudgetAmount;
             return true;
+        }
+
+        // ---------------------------------------------------------
+        // PHASE B (Monthly Budgets)
+        // ---------------------------------------------------------
+        public List<CategoryBudgetView> GetMonthlyBudgetsWithNames(int year, int month)
+        {
+            ValidateYearMonth(year, month);
+            return _monthlyBudgetRepo.GetAllWithCategoryNames(year, month);
+        }
+
+        public void SetMonthlyBudget(int categoryId, int year, int month, decimal amount)
+        {
+            ValidateYearMonth(year, month);
+
+            if (categoryId <= 0)
+                throw new ArgumentException("CategoryId must be greater than zero.", nameof(categoryId));
+
+            if (amount < 0)
+                throw new ArgumentException("Budget amount must be zero or positive.", nameof(amount));
+
+            var category = _categoryRepo.GetById(categoryId);
+            if (category == null)
+                throw new InvalidOperationException($"Category does not exist (Id: {categoryId}).");
+
+            // Capture old value (if any) before writing
+            var existing = _monthlyBudgetRepo.Get(categoryId, year, month);
+            var oldAmount = existing?.BudgetAmount ?? 0m;
+
+            // Write
+            _monthlyBudgetRepo.Upsert(categoryId, year, month, amount);
+
+            // Log only if it truly changed
+            if (oldAmount != amount)
+            {
+                _changeLogRepo.Add(new BudgetChangeLog
+                {
+                    CategoryId = categoryId,
+                    Year = year,
+                    Month = month,
+                    OldAmount = oldAmount,
+                    NewAmount = amount,
+                    Action = "Update"
+                });
+            }
+        }
+
+        public void DeleteMonthlyBudget(int categoryId, int year, int month)
+        {
+            ValidateYearMonth(year, month);
+
+            if (categoryId <= 0)
+                return;
+
+            // Capture old before delete
+            var existing = _monthlyBudgetRepo.Get(categoryId, year, month);
+            var oldAmount = existing?.BudgetAmount ?? 0m;
+
+            _monthlyBudgetRepo.Delete(categoryId, year, month);
+
+            // Only log if there was something to clear
+            if (existing != null && oldAmount != 0m)
+            {
+                _changeLogRepo.Add(new BudgetChangeLog
+                {
+                    CategoryId = categoryId,
+                    Year = year,
+                    Month = month,
+                    OldAmount = oldAmount,
+                    NewAmount = 0m,
+                    Action = "Clear"
+                });
+            }
+        }
+
+        public bool TryGetMonthlyBudgetAmount(int categoryId, int year, int month, out decimal budgetAmount)
+        {
+            budgetAmount = 0m;
+
+            ValidateYearMonth(year, month);
+
+            if (categoryId <= 0)
+                return false;
+
+            var row = _monthlyBudgetRepo.Get(categoryId, year, month);
+            if (row == null)
+                return false;
+
+            budgetAmount = row.BudgetAmount;
+            return true;
+        }
+
+        // Phase C: expose history for later UI
+        public List<BudgetChangeLog> GetMonthlyBudgetHistory(int categoryId, int year, int month, int maxRows = 50)
+        {
+            ValidateYearMonth(year, month);
+
+            if (categoryId <= 0)
+                return new List<BudgetChangeLog>();
+
+            return _changeLogRepo.GetForCategoryMonth(categoryId, year, month, maxRows);
+        }
+
+        private static void ValidateYearMonth(int year, int month)
+        {
+            if (year < 1)
+                throw new ArgumentOutOfRangeException(nameof(year), "Year must be greater than 0.");
+
+            if (month < 1 || month > 12)
+                throw new ArgumentOutOfRangeException(nameof(month), "Month must be between 1 and 12.");
         }
     }
 }

@@ -13,12 +13,6 @@ using BudgetTracker.Wpf.Net8.Views;
 
 namespace BudgetTracker.Wpf.Net8.ViewModels
 {
-    /// <summary>
-    /// ViewModel for the main Transactions grid screen.
-    /// - Loads transactions from SQL via BudgetService
-    /// - Supports Refresh / Add / Edit / Delete
-    /// - Supports Search (Description + Category)
-    /// </summary>
     public sealed class TransactionsViewModel : INotifyPropertyChanged
     {
         private readonly BudgetService _budgetService;
@@ -26,12 +20,8 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
-        // -----------------------------
-        // Data bound to the DataGrid
-        // -----------------------------
         public ObservableCollection<Transaction> Transactions { get; } = new();
 
-        // Selected row in the DataGrid
         private Transaction? _selectedTransaction;
         public Transaction? SelectedTransaction
         {
@@ -49,15 +39,8 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             }
         }
 
-        // -----------------------------
-        // Search / Filter
-        // -----------------------------
         private string _searchText = string.Empty;
 
-        /// <summary>
-        /// Search text bound to the Search TextBox.
-        /// When it changes, we reload the grid using the search API.
-        /// </summary>
         public string SearchText
         {
             get => _searchText;
@@ -74,9 +57,6 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             }
         }
 
-        // -----------------------------
-        // Commands (Buttons)
-        // -----------------------------
         public RelayCommand RefreshCommand { get; }
         public RelayCommand AddTransactionCommand { get; }
         public RelayCommand EditSelectedCommand { get; }
@@ -85,13 +65,14 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
 
         public TransactionsViewModel()
         {
-            // Uses your existing ADO.NET repository + service
             var txRepo = new TransactionRepository();
             _budgetService = new BudgetService(txRepo);
 
-            // Budget read access for overspend warnings (Phase A)
             var categoryRepo = new CategoryRepository();
-            _budgetPlanService = new BudgetPlanService(new CategoryBudgetRepository(), categoryRepo);
+            _budgetPlanService = new BudgetPlanService(
+                new CategoryBudgetRepository(),
+                new MonthlyCategoryBudgetRepository(),
+                categoryRepo);
 
             RefreshCommand = new RelayCommand(Refresh);
             AddTransactionCommand = new RelayCommand(OpenAddDialog);
@@ -102,23 +83,12 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             Refresh();
         }
 
-        // -----------------------------
-        // Load / Refresh
-        // -----------------------------
-        private void Refresh()
-        {
-            // If user is searching, Refresh should re-run the same search.
-            // If empty search, show all.
-            ApplySearch();
-        }
+        private void Refresh() => ApplySearch();
 
         private void ApplySearch()
         {
             var keyword = (SearchText ?? string.Empty).Trim();
 
-            // Using your existing service method:
-            // - if keyword blank, it returns empty list
-            // - so we use GetAllTransactions when blank
             var list = string.IsNullOrWhiteSpace(keyword)
                 ? _budgetService.GetAllTransactions()
                 : _budgetService.SearchTransactions(keyword);
@@ -127,19 +97,15 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             foreach (var t in list)
                 Transactions.Add(t);
 
-            // If the selected transaction is no longer in the list, clear selection
             if (SelectedTransaction != null && Transactions.All(t => t.Id != SelectedTransaction.Id))
                 SelectedTransaction = null;
         }
 
         private void ClearSearch()
         {
-            SearchText = string.Empty; // triggers ApplySearch()
+            SearchText = string.Empty;
         }
 
-        // -----------------------------
-        // Add
-        // -----------------------------
         private void OpenAddDialog()
         {
             var window = new AddTransactionWindow
@@ -155,18 +121,14 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             {
                 var pending = vm.CreatedTransaction;
 
-                // PHASE A: Overspend warning (Expense only)
                 if (!ConfirmOverspendIfNeeded(pending, excludeTransactionId: null))
                     return;
 
                 _budgetService.AddTransaction(pending);
-                ApplySearch(); // keep current filter applied
+                ApplySearch();
             }
         }
 
-        // -----------------------------
-        // Edit
-        // -----------------------------
         private void OpenEditDialog()
         {
             if (SelectedTransaction == null)
@@ -177,7 +139,6 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
                 Owner = Application.Current?.MainWindow
             };
 
-            // Pre-fill from selected row
             if (window.DataContext is AddTransactionViewModel vm)
             {
                 vm.Date = SelectedTransaction.Date;
@@ -212,23 +173,16 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             if (window.DataContext is AddTransactionViewModel vmAfter && vmAfter.CreatedTransaction != null)
             {
                 var updated = vmAfter.CreatedTransaction;
-
-                // CRITICAL: keep original Id so UPDATE happens
                 updated.Id = SelectedTransaction.Id;
 
-                // PHASE A: Overspend warning (Expense only)
-                // For edit: exclude this transaction so we don't double-count it in "spent so far"
                 if (!ConfirmOverspendIfNeeded(updated, excludeTransactionId: SelectedTransaction.Id))
                     return;
 
                 _budgetService.UpdateTransaction(updated);
-                ApplySearch(); // keep current filter applied
+                ApplySearch();
             }
         }
 
-        // -----------------------------
-        // Delete
-        // -----------------------------
         private void DeleteSelected()
         {
             if (SelectedTransaction == null)
@@ -244,39 +198,30 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
                 return;
 
             _budgetService.DeleteTransaction(SelectedTransaction.Id);
-            ApplySearch(); // keep current filter applied
+            ApplySearch();
         }
 
-        // -----------------------------
-        // PHASE A: Overspend warning helper
-        // -----------------------------
         private bool ConfirmOverspendIfNeeded(Transaction pending, int? excludeTransactionId)
         {
             if (pending == null)
                 return true;
 
-            // Only warn for Expense
             if (pending.Type == null || !pending.Type.Equals("Expense", StringComparison.OrdinalIgnoreCase))
                 return true;
 
-            // Need a CategoryId to check budget reliably
             if (!pending.CategoryId.HasValue || pending.CategoryId.Value <= 0)
                 return true;
 
             var categoryId = pending.CategoryId.Value;
 
-            // If no budget exists for this category, don't warn
-            if (!_budgetPlanService.TryGetBudgetAmount(categoryId, out var budgetAmount))
-                return true;
-
-            // Determine month/year from transaction date (this matches how your Budgets tab uses SelectedMonth/Year)
             var year = pending.Date.Year;
             var month = pending.Date.Month;
 
-            // Spent so far in this category for this month (excluding the transaction being edited if applicable)
-            var spentSoFar = _budgetService.GetTotalExpensesForCategoryMonth(categoryId, year, month, excludeTransactionId);
+            // PHASE B CHANGE: budget is now month-aware
+            if (!_budgetPlanService.TryGetMonthlyBudgetAmount(categoryId, year, month, out var budgetAmount))
+                return true;
 
-            // Projected spend after this save
+            var spentSoFar = _budgetService.GetTotalExpensesForCategoryMonth(categoryId, year, month, excludeTransactionId);
             var projected = spentSoFar + pending.Amount;
 
             if (projected <= budgetAmount)

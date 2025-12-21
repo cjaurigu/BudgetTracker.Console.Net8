@@ -2,22 +2,16 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using BudgetTracker.Console.Net8.Data;
-using BudgetTracker.Console.Net8.Domain;
 using BudgetTracker.Console.Net8.Services;
 using BudgetTracker.Wpf.Net8.Views;
 
 namespace BudgetTracker.Wpf.Net8.ViewModels
 {
-    /// <summary>
-    /// Budgets tab:
-    /// - Set monthly budgets per category (one budget per category)
-    /// - Show month "spent" totals from transactions
-    /// - Show remaining
-    /// </summary>
     public sealed class BudgetsViewModel : INotifyPropertyChanged
     {
         private readonly BudgetPlanService _budgetPlanService;
@@ -106,6 +100,7 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
 
             _budgetPlanService = new BudgetPlanService(
                 new CategoryBudgetRepository(),
+                new MonthlyCategoryBudgetRepository(),
                 _categoryRepo);
 
             _budgetService = new BudgetService(new TransactionRepository());
@@ -126,23 +121,20 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
 
         private void Refresh()
         {
-            // 1) Load all categories
-            var categories = _categoryRepo.GetAll();
+            // 1) Load monthly budgets for selected month
+            var monthlyBudgets = _budgetPlanService.GetMonthlyBudgetsWithNames(SelectedYear, SelectedMonth);
+            var budgetByCategoryId = monthlyBudgets.ToDictionary(b => b.CategoryId, b => b.BudgetAmount);
 
-            // 2) Load all budgets (with names)
-            var budgets = _budgetPlanService.GetAllBudgetsWithNames();
-
-            var budgetByCategoryId = budgets.ToDictionary(b => b.CategoryId, b => b.BudgetAmount);
-
-            // 3) Load monthly spending by category name (using existing summaries)
-            // NOTE: This uses CategoryName mapping. Works great for normal usage.
+            // 2) Load monthly spending summaries (grouped by name)
             var summaries = _budgetService.GetCategorySummariesByMonth(SelectedYear, SelectedMonth);
             var spentByCategoryName = summaries.ToDictionary(
                 s => s.CategoryName,
                 s => s.TotalExpense,
                 StringComparer.OrdinalIgnoreCase);
 
-            // 4) Build grid rows
+            // 3) Build grid rows from categories
+            var categories = _categoryRepo.GetAll();
+
             var rows = new List<BudgetRow>();
             foreach (var c in categories)
             {
@@ -158,7 +150,7 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
                 });
             }
 
-            // 5) Apply search filter (by category name)
+            // 4) Search filter
             var keyword = (SearchText ?? string.Empty).Trim();
             if (!string.IsNullOrWhiteSpace(keyword))
             {
@@ -167,19 +159,18 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
                     .ToList();
             }
 
-            // 6) Push to observable collection
+            // 5) Push to observable collection
             BudgetRows.Clear();
             foreach (var r in rows.OrderBy(r => r.CategoryName))
                 BudgetRows.Add(r);
 
-            // keep selection valid
             if (SelectedRow != null && BudgetRows.All(r => r.CategoryId != SelectedRow.CategoryId))
                 SelectedRow = null;
         }
 
         private void ClearSearch()
         {
-            SearchText = string.Empty; // triggers Refresh()
+            SearchText = string.Empty;
         }
 
         private void OpenEditDialog()
@@ -187,8 +178,12 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             if (SelectedRow == null)
                 return;
 
+            // PHASE C: warn if this category/month already has spending
+            if (!ConfirmEditingBudgetIfSpendingExists())
+                return;
+
             var win = new BudgetEditWindow(
-                title: $"Set Budget - {SelectedRow.CategoryName}",
+                title: $"Set Budget - {SelectedRow.CategoryName} ({SelectedYear}/{SelectedMonth:00})",
                 initialAmount: SelectedRow.BudgetAmount)
             {
                 Owner = Application.Current?.MainWindow
@@ -200,7 +195,7 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
 
             try
             {
-                _budgetPlanService.SetBudget(SelectedRow.CategoryId, win.BudgetAmount);
+                _budgetPlanService.SetMonthlyBudget(SelectedRow.CategoryId, SelectedYear, SelectedMonth, win.BudgetAmount);
                 Refresh();
             }
             catch (Exception ex)
@@ -214,8 +209,12 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
             if (SelectedRow == null)
                 return;
 
+            // PHASE C: warn if spending exists
+            if (!ConfirmEditingBudgetIfSpendingExists())
+                return;
+
             var confirm = MessageBox.Show(
-                $"Clear budget for:\n\n{SelectedRow.CategoryName} ?",
+                $"Clear monthly budget for:\n\n{SelectedRow.CategoryName}\n({SelectedYear}/{SelectedMonth:00}) ?",
                 "Confirm Clear Budget",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning);
@@ -225,13 +224,41 @@ namespace BudgetTracker.Wpf.Net8.ViewModels
 
             try
             {
-                _budgetPlanService.DeleteBudget(SelectedRow.CategoryId);
+                _budgetPlanService.DeleteMonthlyBudget(SelectedRow.CategoryId, SelectedYear, SelectedMonth);
                 Refresh();
             }
             catch (Exception ex)
             {
                 MessageBox.Show(ex.Message, "Clear Budget Failed", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private bool ConfirmEditingBudgetIfSpendingExists()
+        {
+            if (SelectedRow == null)
+                return true;
+
+            var spent = _budgetService.GetTotalExpensesForCategoryMonth(
+                SelectedRow.CategoryId,
+                SelectedYear,
+                SelectedMonth);
+
+            if (spent <= 0m)
+                return true;
+
+            var msg =
+                $"This category already has spending for {SelectedYear}/{SelectedMonth:00}.\n\n" +
+                $"Spent so far: {spent.ToString("C", CultureInfo.CurrentCulture)}\n\n" +
+                $"Changing the budget will not change transactions — it will only change reporting.\n\n" +
+                $"Do you want to continue?";
+
+            var choice = MessageBox.Show(
+                msg,
+                "Edit Past Budget Warning",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            return choice == MessageBoxResult.Yes;
         }
 
         private void OnPropertyChanged([CallerMemberName] string? name = null)
